@@ -7,7 +7,7 @@ open Solutions.Day05a
 [<Fact>]
 let sample () =
     Assert.Equal(
-        35,
+        35L,
         doIt
             """
 seeds: 79 14 55 13

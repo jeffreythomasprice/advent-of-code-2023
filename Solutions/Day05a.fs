@@ -4,15 +4,15 @@ open System
 open System.Text.RegularExpressions
 open System.Collections.Generic
 
-let parseInt (s: string) : (int * string) option =
+let parseInt (s: string) : (int64 * string) option =
     let m = Regex("([0-9]+)(.*)").Match(s.Trim())
 
     if m.Success then
-        Some(m.Groups[1].Value |> int, m.Groups[2].Value)
+        Some(m.Groups[1].Value |> int64, m.Groups[2].Value)
     else
         None
 
-let parseInts (s: string) : int list * string =
+let parseInts (s: string) : int64 list * string =
     let rec f s =
         match parseInt s with
         | Some(value, remainder) ->
@@ -22,20 +22,20 @@ let parseInts (s: string) : int list * string =
 
     f s
 
-let parseLinesOfInts (lines: string list) : int list list * string list =
+let parseLinesOfInts (lines: string list) : int64 list list * string list =
     let rec f lines =
         match lines with
         | head :: remainder ->
             match parseInts head with
             | [], _ -> [], lines
-            | (result: int list), _ ->
+            | (result: int64 list), _ ->
                 let otherResults, remainder = f remainder
                 result :: otherResults, remainder
         | [] -> [], lines
 
     f lines
 
-let parseSeedsList (lines: string list) : (int list * string list) option =
+let parseSeedsList (lines: string list) : (int64 list * string list) option =
     match lines with
     | head :: remainder ->
         if Regex("^seeds:[0-9 ]+$").Match(head).Success then
@@ -45,10 +45,30 @@ let parseSeedsList (lines: string list) : (int list * string list) option =
             None
     | [] -> None
 
+type Range =
+    { source: int64
+      destination: int64
+      count: int64 }
+
+    member this.contains x =
+        x >= this.source && x <= this.source + this.count
+
+    member this.apply x =
+        if this.contains x then
+            Some(x - this.source + this.destination)
+        else
+            None
+
 type Map =
     { source: string
       destination: string
-      data: IDictionary<int, int> }
+      data: Range list }
+
+    member this.apply x =
+        // TODO actually check all the ranges
+        match (this.data |> Seq.tryFind (fun d -> d.contains x)) with
+        | Some(r) -> (r.apply x).Value
+        | _ -> x
 
 let parseMap (lines: string list) : (Map * string list) option =
     match lines with
@@ -62,12 +82,14 @@ let parseMap (lines: string list) : (Map * string list) option =
 
             let data =
                 numbers
-                |> Seq.collect (fun row ->
+                |> Seq.map (fun row ->
                     match row with
                     | [ destination; source; count ] ->
-                        seq { 0 .. count - 1 } |> Seq.map (fun i -> source + i, destination + i)
+                        { source = source
+                          destination = destination
+                          count = count }
                     | _ -> raise (Exception(sprintf "expeted lists of length 3, got %A" numbers)))
-                |> dict
+                |> Seq.toList
 
             Some(
                 { source = source
@@ -89,7 +111,7 @@ let parseMapsList (lines: string list) : Map list * string list =
 
     f lines
 
-let doIt (input: string) : int =
+let doIt (input: string) : int64 =
     let lines =
         input.Split "\n"
         |> Array.toSeq
@@ -123,14 +145,7 @@ let doIt (input: string) : int =
         maps <- maps |> List.filter (fun m -> m.source <> current)
         // actually apply this map to each element of our state
         current <- map.destination
-
-        state <-
-            state
-            |> List.map (fun x ->
-                match map.data.TryGetValue x with
-                | true, result -> result
-                | _ -> x)
-
+        state <- state |> List.map map.apply
         printfn "%s = %A" current state
 
     state |> Seq.min
