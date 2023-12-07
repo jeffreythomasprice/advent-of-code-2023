@@ -1,4 +1,4 @@
-module Solutions.Day05a
+module Solutions.Day05b
 
 open System
 open System.Text.RegularExpressions
@@ -35,40 +35,91 @@ let parseLinesOfInts (lines: string list) : int64 list list * string list =
 
     f lines
 
-let parseSeedsList (lines: string list) : (int64 list * string list) option =
+type Range =
+    { first: int64
+      last: int64 }
+
+    member this.apply(other: Range) : Range option * Range list =
+        if other.last < this.first || other.first > this.last then
+            None, [ other ]
+        else
+            let intersection =
+                { first = max this.first other.first
+                  last = min this.last other.last }
+
+            let outside =
+                if other.first < intersection.first && other.last > intersection.last then
+                    [ { first = other.first
+                        last = intersection.first - 1L }
+                      { first = intersection.last + 1L
+                        last = other.last } ]
+                else if other.first < intersection.first then
+                    [ { first = other.first
+                        last = intersection.first - 1L } ]
+                else if other.last > intersection.last then
+                    [ { first = intersection.last + 1L
+                        last = other.last } ]
+                else
+                    []
+
+            Some(intersection), outside
+
+let parseSeedsList (lines: string list) : (Range list * string list) option =
     match lines with
     | head :: remainder ->
         if Regex("^seeds:[0-9 ]+$").Match(head).Success then
             let results, _ = parseInts head
+
+            let results =
+                seq { 0..2 .. results.Length - 1 }
+                |> Seq.map (fun i ->
+                    { first = results[i]
+                      last = results[i] + results[i + 1] - 1L })
+                |> Seq.toList
+
             Some(results, remainder)
         else
             None
     | [] -> None
 
-type Range =
-    { source: int64
-      destination: int64
-      count: int64 }
+type MapRange =
+    { source: Range
+      destination: Range }
 
-    member this.contains x =
-        x >= this.source && x <= this.source + this.count
-
-    member this.apply x =
-        if this.contains x then
-            Some(x - this.source + this.destination)
-        else
-            None
+    member this.apply(r: Range) : Range option * Range list =
+        match this.source.apply r with
+        | Some(intersection), outside ->
+            Some(
+                { first = intersection.first - this.source.first + this.destination.first
+                  last = intersection.last - this.source.first + this.destination.first }
+            ),
+            outside
+        | None, outside -> None, outside
 
 type Map =
     { source: string
       destination: string
-      data: Range list }
+      data: MapRange list }
 
-    member this.apply x =
-        // TODO actually check all the ranges
-        match (this.data |> Seq.tryFind (fun d -> d.contains x)) with
-        | Some(r) -> (r.apply x).Value
-        | _ -> x
+    member this.apply(r: Range) : Range list =
+        let mutable results = []
+        let mutable input = [ r ]
+
+        for d in this.data do
+            let mutable newInput = []
+
+            for i in input do
+                let intersection, outside = d.apply i
+
+                match intersection with
+                | Some(intersection) -> results <- intersection :: results
+                | None -> ()
+
+                newInput <- newInput @ outside
+
+            input <- newInput
+
+        results @ input
 
 let parseMap (lines: string list) : (Map * string list) option =
     match lines with
@@ -85,9 +136,12 @@ let parseMap (lines: string list) : (Map * string list) option =
                 |> Seq.map (fun row ->
                     match row with
                     | [ destination; source; count ] ->
-                        { source = source
-                          destination = destination
-                          count = count }
+                        { source =
+                            { first = source
+                              last = source + count - 1L }
+                          destination =
+                            { first = destination
+                              last = destination + count - 1L } }
                     | _ -> raise (Exception(sprintf "expected lists of length 3, got %A" numbers)))
                 |> Seq.toList
 
@@ -145,7 +199,7 @@ let doIt (input: string) : int64 =
         maps <- maps |> List.filter (fun m -> m.source <> current)
         // actually apply this map to each element of our state
         current <- map.destination
-        state <- state |> List.map map.apply
+        state <- state |> List.collect map.apply
         printfn "%s = %A" current state
 
-    state |> Seq.min
+    state |> Seq.map _.first |> Seq.min
