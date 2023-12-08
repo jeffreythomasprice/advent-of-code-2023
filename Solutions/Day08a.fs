@@ -16,7 +16,10 @@ let doIt (input: string) : int =
         |> Seq.map (fun x -> x.Trim())
         |> Seq.filter (fun x -> not (String.IsNullOrWhiteSpace x))
 
-    let instructions :: nodes = lines |> Seq.toList
+    let instructions, nodes =
+        match lines |> Seq.toList with
+        | h :: r -> h, r
+        | _ -> raise (Exception "expected multiple lines of input")
 
     let instructions = Seq.initInfinite (fun i -> instructions[i % instructions.Length])
 
