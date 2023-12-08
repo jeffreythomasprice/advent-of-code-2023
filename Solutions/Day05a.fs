@@ -65,7 +65,6 @@ type Map =
       data: Range list }
 
     member this.apply x =
-        // TODO actually check all the ranges
         match (this.data |> Seq.tryFind (fun d -> d.contains x)) with
         | Some(r) -> (r.apply x).Value
         | _ -> x
