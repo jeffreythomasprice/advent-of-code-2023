@@ -119,8 +119,6 @@ let doIt (input: string) : int =
         |> Seq.map (fun (coord, _) -> coord)
         |> Seq.toList
 
-    printfn "TODO neighbors of start = %A" neighborsOfStart
-
     let startCell =
         Cell.fromDeltas (
             neighborsOfStart
@@ -128,8 +126,6 @@ let doIt (input: string) : int =
                 { x = neighbor.x - startCoord.x
                   y = neighbor.y - startCoord.y })
         )
-
-    printfn "TODO start cell = %A" startCell
 
     let input =
         Array2D.init height width (fun y x ->
