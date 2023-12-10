@@ -25,6 +25,7 @@
     <Compile Include="Day09a.fs" />
     <Compile Include="Day09b.fs" />
     <Compile Include="Day10a.fs" />
+    <Compile Include="Day10b.fs" />
   </ItemGroup>
 
 </Project>
