@@ -16,8 +16,10 @@ let doIt (input: string) : int =
         |> Seq.map (fun line -> Regex("^([.#?]+)\s+([0-9]+(?:,[0-9]+)*)$").Match(line))
         |> Seq.filter (fun m -> m.Success)
         |> Seq.map (fun m ->
+            let s = m.Groups[1].Value
+
             let pattern =
-                m.Groups[1].Value
+                s
                 |> Seq.map (fun c ->
                     match c with
                     | '#' -> Some true
@@ -27,83 +29,59 @@ let doIt (input: string) : int =
                 |> Seq.toList
 
             let numbers = m.Groups[2].Value.Split(',') |> Seq.map int |> Seq.toList
-            pattern, numbers)
+            s, pattern, numbers)
 
     let rec checkInput (input: bool option list) (numbers: int list) : int =
-        // skip any leading definitely not a number section
-        let input = input |> List.skipWhile (fun x -> x = Some false)
+        match input, numbers with
+        // success, we reached the end of both lists
+        | [], [] -> 1
 
-        match numbers with
-        // at least one number remaining
-        | nextNumber :: remainingNumbers ->
+        // fail, we reached the end of the input but have more numbers to place
+        | [], _ -> 0
 
-            printfn "TODO checkInput, numbers = %A :: %A" nextNumber remainingNumbers
-            printfn "TODO checkInput, input = %A" input
+        // we can skip gaps
+        | Some false :: remainingInput, _ -> checkInput remainingInput numbers
 
-            let minimumSizeForNumbers (numbers: int list) : int =
-                if numbers.Length = 0 then
-                    0
-                else
-                    (numbers |> Seq.sum) + (numbers.Length - 1)
+        // if we have a choice we take both paths and sum the results
+        | None :: remainingInput, _ ->
+            (checkInput (Some true :: remainingInput) numbers)
+            + (checkInput (Some false :: remainingInput) numbers)
 
-            let waysToPutNumberAtBeginning =
-                if
-                    // true if we have enough space for the number and a gap after it
-                    (input.Length >= (nextNumber + 1))
-                    // true if the number could fit at the start of the input
-                    && (input |> Seq.take nextNumber |> Seq.forall (fun x -> x <> Some false))
-                    // true if the one after that is the gap
-                    && input[nextNumber] <> Some true
-                    // and the remaining nuimbers could theoretically fit in the remaining space
-                    && (minimumSizeForNumbers remainingNumbers) <= (input.Length - nextNumber - 1)
-                then
-                    // we could put the number at this location in the list, skip the number and the next gap, and recurse
-                    let remainingInput = input |> List.skip (nextNumber + 1)
+        // we must place a number here, but have no numbers remaining
+        | Some true :: _, [] -> 0
 
-                    checkInput remainingInput remainingNumbers
-                else if
-                    // true if we have enough space just for the number
-                    input.Length = nextNumber
-                    // true if the number can fit there
-                    && (input |> Seq.forall (fun x -> x <> Some false))
-                    // and there are no more numbers
-                    && remainingNumbers.Length = 0
-                then
-                    // exactly one number, and it fits in the remaining space
-                    1
-                else
-                    // the number can't fit here
-                    0
-
-            let waysToSkipAGapAtTheBeginning =
-                match input with
-                // first is definitely not false
-                | Some true :: remainingInput -> 0
-                // first could be false, skip it and keep trying
-                | _ :: remainingInput ->
-                    if (minimumSizeForNumbers numbers) > remainingInput.Length then
+        // we must place the next number here, and have one to check
+        | Some true :: _, nextNumber :: remainingNumbers ->
+            // we have to be able to place the number at the start, so the first few elements have to all be either Some true or None
+            if
+                input.Length >= nextNumber
+                && input |> Seq.take nextNumber |> Seq.forall (fun x -> x <> Some false)
+            then
+                // ok so it goes here, so skip that many
+                let remainingInput = input |> List.skip nextNumber
+                // if there is at least one remaining input, it has to be Some false or None, because it has to be a gap
+                if remainingInput.Length >= 1 then
+                    if remainingInput.Head = Some true then
+                        // the next one has to be part of a number, so this can't work
                         0
                     else
-                        checkInput remainingInput numbers
-                // no input remaining
-                | [] -> 0
-
-            waysToPutNumberAtBeginning + waysToSkipAGapAtTheBeginning
-
-        // no numbers remaining
-        | [] ->
-            // if we could have nothing in the input then we could do it this way
-            // if there's at least one true in the remaining input then this can't work
-            if input |> Seq.forall (fun x -> x <> Some true) then
-                1
+                        // the next one can be a gap, so skip that too
+                        let remainingInput = remainingInput |> List.skip 1
+                        // and recurse
+                        checkInput remainingInput remainingNumbers
+                else
+                    // this was actually the entire input, we can just recurse to see if there are more numbers
+                    checkInput remainingInput remainingNumbers
             else
+                // the number can't fit at the start
                 0
 
     input
     // TODO no
     // |> Seq.skip 1
     // |> Seq.take 1
-    |> Seq.map (fun (pattern, numbers) ->
+    |> Seq.indexed
+    |> Seq.map (fun (i, (patternString, pattern, numbers)) ->
         // TODO part b has the bigger inputs
 
         let pattern =
@@ -119,10 +97,9 @@ let doIt (input: string) : int =
 
         let numbers = numbers @ numbers @ numbers @ numbers @ numbers
 
-        printfn "TODO pattern = %A" pattern
-        printfn "TODO numbers = %A" numbers
+        printfn "(%d/%d) %s, %A" (i + 1) (input |> Seq.length) patternString numbers
         let result = checkInput pattern numbers
-        printfn "TODO result = %d" result
+        printfn "result = %d" result
 
         result)
     |> Seq.sum
