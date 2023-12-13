@@ -30,9 +30,21 @@ let doIt (input: string) : int =
             pattern, numbers)
 
     let rec checkInput (input: bool option list) (numbers: int list) : int =
+        // skip any leading definitely not a number section
+        let input = input |> List.skipWhile (fun x -> x = Some false)
+
         match numbers with
         // at least one number remaining
         | nextNumber :: remainingNumbers ->
+
+            printfn "TODO checkInput, numbers = %A :: %A" nextNumber remainingNumbers
+            printfn "TODO checkInput, input = %A" input
+
+            let minimumSizeForNumbers (numbers: int list) : int =
+                if numbers.Length = 0 then
+                    0
+                else
+                    (numbers |> Seq.sum) + (numbers.Length - 1)
 
             let waysToPutNumberAtBeginning =
                 if
@@ -42,18 +54,23 @@ let doIt (input: string) : int =
                     && (input |> Seq.take nextNumber |> Seq.forall (fun x -> x <> Some false))
                     // true if the one after that is the gap
                     && input[nextNumber] <> Some true
+                    // and the remaining nuimbers could theoretically fit in the remaining space
+                    && (minimumSizeForNumbers remainingNumbers) <= (input.Length - nextNumber - 1)
                 then
                     // we could put the number at this location in the list, skip the number and the next gap, and recurse
                     let remainingInput = input |> List.skip (nextNumber + 1)
+
                     checkInput remainingInput remainingNumbers
                 else if
                     // true if we have enough space just for the number
                     input.Length = nextNumber
                     // true if the number can fit there
                     && (input |> Seq.forall (fun x -> x <> Some false))
+                    // and there are no more numbers
+                    && remainingNumbers.Length = 0
                 then
-                    // recurse anyway, even though we should be out of input, just to check whether there are more numbers
-                    checkInput [] remainingNumbers
+                    // exactly one number, and it fits in the remaining space
+                    1
                 else
                     // the number can't fit here
                     0
@@ -63,7 +80,11 @@ let doIt (input: string) : int =
                 // first is definitely not false
                 | Some true :: remainingInput -> 0
                 // first could be false, skip it and keep trying
-                | _ :: remainingInput -> checkInput remainingInput numbers
+                | _ :: remainingInput ->
+                    if (minimumSizeForNumbers numbers) > remainingInput.Length then
+                        0
+                    else
+                        checkInput remainingInput numbers
                 // no input remaining
                 | [] -> 0
 
