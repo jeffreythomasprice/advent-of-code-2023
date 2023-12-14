@@ -77,13 +77,8 @@ let doIt (input: string) : int =
                 0
 
     input
-    // TODO no
-    // |> Seq.skip 1
-    // |> Seq.take 1
     |> Seq.indexed
     |> Seq.map (fun (i, (patternString, pattern, numbers)) ->
-        // TODO part b has the bigger inputs
-
         let pattern =
             pattern
             @ [ None ]
