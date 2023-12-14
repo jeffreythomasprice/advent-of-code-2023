@@ -1,11 +1,10 @@
-module Solutions.Day13a
+module Solutions.Day13b
 
 open System
 open System.Text.RegularExpressions
 open System.Collections.Generic
 
 type Shape = { height: int; shape: string list }
-
 
 let score (shape: Shape) : int =
     let possibleMirrorLocations =
@@ -15,6 +14,8 @@ let score (shape: Shape) : int =
                 let below = shape.height - y
                 let range = min above below
 
+                let mutable haveChangedSomething = false
+
                 if
                     seq {
                         for i in 0 .. (range - 1) do
@@ -22,9 +23,39 @@ let score (shape: Shape) : int =
                             let y2 = y - 1 - i
                             let line1 = shape.shape[y1]
                             let line2 = shape.shape[y2]
-                            yield line1 = line2
+
+                            let lineToBitmask (line: string) : int =
+                                line
+                                |> Seq.indexed
+                                |> Seq.fold
+                                    (fun result (i, c) ->
+
+                                        let bit = if c = '#' then 1 else 0
+                                        result ||| (bit <<< i))
+                                    0
+
+                            let bitmask1 = lineToBitmask line1
+                            let bitmask2 = lineToBitmask line2
+
+                            yield
+                                if bitmask1 = bitmask2 then
+                                    true
+                                else if not haveChangedSomething then
+                                    // should be one where they are different
+                                    let difference = bitmask1 ^^^ bitmask2
+                                    // we want exactly one bit set, so this should just be a power of 2
+                                    // https://stackoverflow.com/q/1053582
+                                    if not ((difference <> 1) && ((difference &&& (difference - 1)) <> 0)) then
+                                        haveChangedSomething <- true
+                                        true
+                                    else
+                                        false
+                                else
+                                    // not equal and we've already changed something so we can't again
+                                    false
                     }
                     |> Seq.forall (fun x -> x)
+                    && haveChangedSomething
                 then
                     yield y
         }
