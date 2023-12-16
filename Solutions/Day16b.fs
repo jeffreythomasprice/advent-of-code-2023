@@ -16,7 +16,13 @@ type Map =
       height: int
       data: Cell array2d }
 
-type Vector = { x: int; y: int }
+type Vector =
+    { x: int
+      y: int }
+
+    member this.add(other: Vector) : Vector =
+        { x = this.x + other.x
+          y = this.y + other.y }
 
 type Direction =
     | West
@@ -37,119 +43,79 @@ type Ray =
 let inBounds (map: Map) (point: Vector) : bool =
     point.x >= 0 && point.x < map.width && point.y >= 0 && point.y < map.height
 
-let rec check (map: Map) (visitedCells: Vector Set) (visitedRays: Ray list) (current: Ray) : Vector Set * Ray list =
-    if visitedRays |> List.contains current then
-        visitedCells, visitedRays
-    else
-        let visitedRays = current :: visitedRays
+type Line =
+    { origin: Ray
+      endPoint: Vector
+      children: Ray list }
 
-        let newLocation =
-            { x = current.origin.x + current.direction.vector.x
-              y = current.origin.y + current.direction.vector.y }
+    member this.points: Vector seq =
+        seq {
+            let mutable point = this.origin.origin
 
-        if not (inBounds map newLocation) then
-            visitedCells, visitedRays
-        else
-            let visitedCells = visitedCells |> Set.add newLocation
+            while point <> this.endPoint do
+                yield point
+                point <- point.add this.origin.direction.vector
 
-            match map.data[newLocation.y, newLocation.x] with
-            // if we're at an empty cell we keep going
-            | Empty ->
-                check
-                    map
-                    visitedCells
-                    visitedRays
-                    { origin = newLocation
-                      direction = current.direction }
-            // for splitters, if we stopped here, and we're travelling the right direction, we need to generate new rays
-            // otherwise we stop
+            yield point
+        }
+
+let lineAt (map: Map) (origin: Ray) : Line =
+    let rec scan (current: Ray) : Vector * Ray list =
+        let next =
+            { origin = current.origin.add current.direction.vector
+              direction = current.direction }
+
+        if inBounds map next.origin then
+            match map.data[next.origin.y, next.origin.x] with
+            | Empty -> scan next
             | VerticalSplitter ->
-                match current.direction with
+                match next.direction with
                 | West
                 | East ->
-                    let visitedCells, visitedRays =
-                        check
-                            map
-                            visitedCells
-                            visitedRays
-                            { origin = newLocation
-                              direction = North }
-
-                    let visitedCells, visitedRays =
-                        check
-                            map
-                            visitedCells
-                            visitedRays
-                            { origin = newLocation
-                              direction = South }
-
-                    visitedCells, visitedRays
+                    next.origin,
+                    [ { origin = next.origin
+                        direction = North }
+                      { origin = next.origin
+                        direction = South } ]
                 | North
-                | South ->
-                    check
-                        map
-                        visitedCells
-                        visitedRays
-                        { origin = newLocation
-                          direction = current.direction }
+                | South -> scan next
             | HorizontalSplitter ->
-                match current.direction with
+                match next.direction with
                 | West
-                | East ->
-                    check
-                        map
-                        visitedCells
-                        visitedRays
-                        { origin = newLocation
-                          direction = current.direction }
+                | East -> scan next
                 | North
                 | South ->
-                    let visitedCells, visitedRays =
-                        check
-                            map
-                            visitedCells
-                            visitedRays
-                            { origin = newLocation
-                              direction = West }
-
-                    let visitedCells, visitedRays =
-                        check
-                            map
-                            visitedCells
-                            visitedRays
-                            { origin = newLocation
-                              direction = East }
-
-                    visitedCells, visitedRays
-            // for mirrors we generate a new ray based on the direction
+                    next.origin,
+                    [ { origin = next.origin
+                        direction = West }
+                      { origin = next.origin
+                        direction = East } ]
             | WestToNorthMirror ->
-                let newDirection =
-                    match current.direction with
-                    | West -> South
-                    | East -> North
-                    | North -> East
-                    | South -> West
-
-                check
-                    map
-                    visitedCells
-                    visitedRays
-                    { origin = newLocation
-                      direction = newDirection }
+                next.origin,
+                [ { origin = next.origin
+                    direction =
+                      (match next.direction with
+                       | West -> South
+                       | East -> North
+                       | North -> East
+                       | South -> West) } ]
             | WestToSouthMirror ->
-                let newDirection =
-                    match current.direction with
-                    | West -> North
-                    | East -> South
-                    | North -> West
-                    | South -> East
+                next.origin,
+                [ { origin = next.origin
+                    direction =
+                      (match next.direction with
+                       | West -> North
+                       | East -> South
+                       | North -> West
+                       | South -> East) } ]
+        else
+            current.origin, []
 
-                check
-                    map
-                    visitedCells
-                    visitedRays
-                    { origin = newLocation
-                      direction = newDirection }
+    let endPoint, children = scan origin
+
+    { origin = origin
+      endPoint = endPoint
+      children = children }
 
 let doIt (input: string) : int =
     let lines =
@@ -184,40 +150,33 @@ let doIt (input: string) : int =
           height = height
           data = Array2D.init height width (fun y x -> input[y][x]) }
 
-    // TODO no?
-    let solve (ray: Ray) : int =
-        let visitedCells, _ = check map Set.empty [] ray
+    let mutable cachedResults: Map<Ray, Vector Set> = Map.empty
 
-        visitedCells
-        // because we started off-grid
-        |> Set.filter (inBounds map)
-        |> Set.count
+    let rec solveAt (ray: Ray) : Vector Set =
+        match cachedResults.TryFind ray with
+        | Some existing -> existing
+        | None ->
+            // put a dummy value in the map
+            // this prevents infinite recursion if we have a loop and end up here again
+            // we'll replace this with the real value when we have all the children finished
+            cachedResults <- cachedResults |> Map.add ray (set [])
 
-    // returns the list of all visited points until the next non-empty, and the last point visited
-    let rec walkToNext (ray: Ray) : Vector Set * Vector =
-        let next =
-            { x = ray.origin.x + ray.direction.vector.x
-              y = ray.origin.y + ray.direction.vector.y }
+            let line = lineAt map ray
 
-        if not (inBounds map next) then
-            set [ ray.origin ], ray.origin
-        else
-            match map.data[next.y, next.x] with
-            | Empty ->
-                let results, last =
-                    walkToNext
-                        { origin = next
-                          direction = ray.direction }
+            // combine the points on this line segment with the combined results of all children
+            let points =
+                Set.union
+                    (line.points |> Seq.filter (inBounds map) |> Set)
+                    (line.children
+                     |> Seq.map solveAt
+                     |> Seq.fold (fun a b -> Set.union a b) Set.empty)
 
-                Set.union results (set [ ray.origin ]), last
-            | _ -> set [ ray.origin; next ], next
-
-    let mutable cachedResults = Map.empty
+            // we have the full list of points including children, so replace the dummy value with that
+            cachedResults <- cachedResults |> Map.add ray points
+            points
 
     seq {
         for x in 0 .. (width - 1) do
-            printfn "TODO start of x = %d (out of width = %d)" x width
-
             yield
                 { origin = { x = x; y = -1 }
                   direction = South }
@@ -227,8 +186,6 @@ let doIt (input: string) : int =
                   direction = North }
 
         for y in 0 .. (height - 1) do
-            printfn "TODO start of y = %d (out of height = %d)" y height
-
             yield
                 { origin = { x = -1; y = y }
                   direction = East }
@@ -237,20 +194,6 @@ let doIt (input: string) : int =
                 { origin = { x = width; y = y }
                   direction = West }
     }
-    |> Seq.map (fun ray ->
-        let points, last = walkToNext ray
-
-        let startingRay =
-            { origin =
-                { x = last.x - ray.direction.vector.x
-                  y = last.y - ray.direction.vector.y }
-              direction = ray.direction }
-
-        match cachedResults.TryFind startingRay with
-        | Some cachedPoints -> Set.union points cachedPoints
-        | None ->
-            let visitedCells, _ = check map Set.empty [] startingRay
-            cachedResults <- cachedResults.Add(startingRay, visitedCells)
-            Set.union points visitedCells)
-    |> Seq.map (fun points -> points |> Set.filter (inBounds map) |> Set.count)
+    |> Seq.map solveAt
+    |> Seq.map (fun points -> points.Count)
     |> Seq.max
