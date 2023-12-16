@@ -165,11 +165,10 @@ let doIt (input: string) : int =
 
             // combine the points on this line segment with the combined results of all children
             let points =
-                Set.union
+                Set.unionMany (
                     (line.points |> Seq.filter (inBounds map) |> Set)
-                    (line.children
-                     |> Seq.map solveAt
-                     |> Seq.fold (fun a b -> Set.union a b) Set.empty)
+                    :: (line.children |> List.map solveAt)
+                )
 
             // we have the full list of points including children, so replace the dummy value with that
             cachedResults <- cachedResults |> Map.add ray points
@@ -195,5 +194,5 @@ let doIt (input: string) : int =
                   direction = West }
     }
     |> Seq.map solveAt
-    |> Seq.map (fun points -> points.Count)
+    |> Seq.map Set.count
     |> Seq.max
