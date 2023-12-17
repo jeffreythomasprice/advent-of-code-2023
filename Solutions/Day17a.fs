@@ -151,6 +151,24 @@ let shortestPathSolver (puzzle: PuzzleInput) (goal: Vector) : Vector -> Vector *
 
     fun location -> state[location]
 
+// the return values are the move you can make here
+// and the agent that you would get if we followed that move and then kept taking the best possible choice up to depth
+let rec allPossibleMoves (puzzle: PuzzleInput) (agent: Agent) (goal: Vector) (depth: int) : (Move * Agent) seq =
+    let moves =
+        possibleMoves puzzle agent
+        |> Seq.map (fun move -> move, takeMove puzzle agent move)
+
+    if depth <= 0 then
+        moves
+    else
+        moves
+        |> Seq.collect (fun (firstMove, agentAfterTheFirstMove) ->
+            if agentAfterTheFirstMove.location = goal then
+                seq [ firstMove, agentAfterTheFirstMove ]
+            else
+                allPossibleMoves puzzle agentAfterTheFirstMove goal (depth - 1)
+                |> Seq.map (fun (_, agentAfterFinalMove) -> firstMove, agentAfterFinalMove))
+
 let bestPossibleMove
     (puzzle: PuzzleInput)
     (agent: Agent)
@@ -158,10 +176,10 @@ let bestPossibleMove
     (shortestPathSolver: Vector -> Vector * int)
     : Move =
     let move, _ =
-        possibleMoves puzzle agent
-        |> Seq.map (fun move ->
-            let _, score = shortestPathSolver move.newLocation
-            move, score)
+        allPossibleMoves puzzle agent goal 8
+        |> Seq.map (fun (move, agentAfterSeveralLegalMoves) ->
+            let _, shortestPathScore = shortestPathSolver agentAfterSeveralLegalMoves.location
+            move, agentAfterSeveralLegalMoves.totalScore + shortestPathScore)
         |> Seq.minBy (fun (_, score) -> score)
 
     move
