@@ -57,6 +57,13 @@ type Direction =
         | East -> South
         | West -> North
 
+    member this.backwards =
+        match this with
+        | North -> South
+        | South -> North
+        | East -> West
+        | West -> East
+
 type Agent =
     { location: Vector
       direction: Direction
@@ -72,25 +79,6 @@ type Move =
     member this.newScore(puzzle: PuzzleInput) : int =
         this.agent.totalScore + puzzle[this.newLocation]
 
-let possibleMoves (puzzle: PuzzleInput) (agent: Agent) : Move seq =
-    let possibleDirections = [ agent.direction.left; agent.direction.right ]
-
-    let sides =
-        if agent.stepsTakenInThatDirection < 3 then
-            agent.direction :: possibleDirections
-        else
-            possibleDirections
-
-    sides
-    |> Seq.map (fun direction -> direction, agent.location + direction.vector)
-    |> Seq.filter (fun (_, newLocation) ->
-        (puzzle.inBounds newLocation)
-        && not (agent.history |> List.contains newLocation))
-    |> Seq.map (fun (newDirection, newLocation) ->
-        { agent = agent
-          newDirection = newDirection
-          newLocation = newLocation })
-
 let takeMove (puzzle: PuzzleInput) (agent: Agent) (move: Move) : Agent =
     { location = move.newLocation
       direction = move.newDirection
@@ -102,22 +90,41 @@ let takeMove (puzzle: PuzzleInput) (agent: Agent) (move: Move) : Agent =
       totalScore = agent.totalScore + puzzle[move.newLocation]
       history = move.newLocation :: agent.history }
 
-// ignores the turns and max distance in a straight line mechanics
-// just pure shortest path to goal given the puzzle numbers
-let shortestPathSolver (puzzle: PuzzleInput) (goal: Vector) : Vector -> Vector * int =
+type ShortestPathNodeWithMove =
+    { location: Vector
+      direction: Direction
+      stepsTakenInThatDirection: int }
+
+type ShortestPathNode =
+    | Start of Vector
+    | Move of ShortestPathNodeWithMove
+
+let shortestPathSolver (puzzle: PuzzleInput) (start: Vector) : ShortestPathNode -> (ShortestPathNode * int) option =
     // https://en.wikipedia.org/wiki/Dijkstra%27s_algorithm
 
-    let mutable state =
+    // value is the score and the next node
+    let mutable state: Map<ShortestPathNode, (int * ShortestPathNode option)> =
         seq {
             for x in 0 .. (puzzle.width - 1) do
                 for y in 0 .. (puzzle.height - 1) do
                     let location = { x = x; y = y }
-                    yield location
-        }
-        |> Seq.map (fun location -> location, (Int32.MaxValue, None))
-        |> Map
 
-    state <- state |> Map.add goal (0, Some goal)
+                    if location = start then
+                        // there's only one node at the start, we can't have arrived here from anywhere else
+                        yield Start location, (0, None)
+                    else
+                        // for all nother nodes we could enter that location from any direction, and we could have been travelling in that
+                        // direction for 1 to 3 steps
+                        for dir in [ North; South; East; West ] do
+                            for steps in 1..3 do
+                                yield
+                                    Move
+                                        { location = location
+                                          direction = dir
+                                          stepsTakenInThatDirection = steps },
+                                    (Int32.MaxValue, None)
+        }
+        |> Map
 
     let mutable remaining = Map.keys state |> Set
 
@@ -130,59 +137,57 @@ let shortestPathSolver (puzzle: PuzzleInput) (goal: Vector) : Vector -> Vector *
 
         remaining <- remaining |> Set.remove current
 
-        let neighbors =
-            [ North; South; East; West ]
-            |> Seq.map (fun direction -> direction.vector + current)
-            |> Seq.filter remaining.Contains
+        let moves =
+            match current with
+            // if we're at the special start node, then the next nodes all the locations we go from here,
+            // where we'll now have been moving for 1 step
+            | Start location ->
+                [ North; South; East; West ]
+                |> Seq.map (fun dir ->
+                    { location = location + dir.vector
+                      direction = dir
+                      stepsTakenInThatDirection = 1 })
+            // otherwise, we can either turn left or right,
+            // and if we haven't been moving straight for too long we can keep going that direction
+            | Move move ->
+                let sides = [ move.direction.left; move.direction.right ]
 
-        let currentDistance, _ = state[current]
-        let proposedDistance = currentDistance + puzzle[current]
+                let directions =
+                    if move.stepsTakenInThatDirection < 3 then
+                        move.direction :: sides
+                    else
+                        sides
 
-        for neighbor in neighbors do
-            let neighborDistance, _ = state[neighbor]
+                directions
+                |> Seq.map (fun dir ->
+                    { location = move.location + dir.vector
+                      direction = dir
+                      stepsTakenInThatDirection =
+                        if dir = move.direction then
+                            move.stepsTakenInThatDirection + 1
+                        else
+                            1 })
 
-            if proposedDistance < neighborDistance then
-                state <- state |> Map.add neighbor (proposedDistance, Some current)
+        let moves =
+            moves
+            // filter that by only those new nodes that are actually on the map
+            |> Seq.filter (fun move -> puzzle.inBounds move.location)
+            // special case, don't ever go back to start it doesn't have the directional kind of nodes
+            |> Seq.filter (fun move -> move.location <> start)
 
-    let state =
-        state
-        |> Map.filter (fun _ (_, next) -> next.IsSome)
-        |> Map.map (fun _ (score, next) -> next.Value, score)
+        let currentScore, _ = state[current]
 
-    fun location -> state[location]
+        for move in moves do
+            let proposedScore = currentScore + puzzle[move.location]
+            let neighborScore, _ = state[Move move]
 
-// the return values are the move you can make here
-// and the agent that you would get if we followed that move and then kept taking the best possible choice up to depth
-let rec allPossibleMoves (puzzle: PuzzleInput) (agent: Agent) (goal: Vector) (depth: int) : (Move * Agent) seq =
-    let moves =
-        possibleMoves puzzle agent
-        |> Seq.map (fun move -> move, takeMove puzzle agent move)
+            if proposedScore < neighborScore then
+                state <- state |> Map.add (Move move) (proposedScore, Some current)
 
-    if depth <= 0 then
-        moves
-    else
-        moves
-        |> Seq.collect (fun (firstMove, agentAfterTheFirstMove) ->
-            if agentAfterTheFirstMove.location = goal then
-                seq [ firstMove, agentAfterTheFirstMove ]
-            else
-                allPossibleMoves puzzle agentAfterTheFirstMove goal (depth - 1)
-                |> Seq.map (fun (_, agentAfterFinalMove) -> firstMove, agentAfterFinalMove))
-
-let bestPossibleMove
-    (puzzle: PuzzleInput)
-    (agent: Agent)
-    (goal: Vector)
-    (shortestPathSolver: Vector -> Vector * int)
-    : Move =
-    let move, _ =
-        allPossibleMoves puzzle agent goal 8
-        |> Seq.map (fun (move, agentAfterSeveralLegalMoves) ->
-            let _, shortestPathScore = shortestPathSolver agentAfterSeveralLegalMoves.location
-            move, agentAfterSeveralLegalMoves.totalScore + shortestPathScore)
-        |> Seq.minBy (fun (_, score) -> score)
-
-    move
+    fun (node: ShortestPathNode) ->
+        match state.TryFind node with
+        | Some(score, Some destination) -> Some(destination, score)
+        | _ -> None
 
 let doIt (input: string) : int =
     let lines =
@@ -207,58 +212,84 @@ let doIt (input: string) : int =
     let startingDirections = [ East; South ]
     let goal = { x = width - 1; y = height - 1 }
 
-    let shortestPath = shortestPathSolver puzzle goal
+    let shortestPath = shortestPathSolver puzzle start
 
-    let nextMove (agent: Agent) =
-        bestPossibleMove puzzle agent goal shortestPath
+    [ North; South; East; West ]
+    |> Seq.collect (fun dir ->
+        seq { 1..3 }
+        |> Seq.map (fun steps ->
+            Move
+                { location = goal
+                  direction = dir
+                  stepsTakenInThatDirection = steps }))
+    |> Seq.iter (fun node ->
+        printfn "TODO possible goal node = %A" node
+        printfn "TODO shortest path to this? %A" (shortestPath node))
 
-    let rec solve (agent: Agent) : Agent =
-        printfn "TODO %A" agent
+    0
 
-        if agent.location = goal then
-            agent
-        else
-            solve (takeMove puzzle agent (nextMove agent))
+// let nextMove (agent: Agent) : Move =
+//     let current =
+//         { location = agent.location
+//           direction = agent.direction
+//           stepsTakenInThatDirection = agent.stepsTakenInThatDirection }
 
-    let startAgent direction =
-        { location = start
-          direction = direction
-          stepsTakenInThatDirection = 0
-          totalScore = 0
-          history = [ start ] }
+//     let next = shortestPath current
 
-    let solution =
-        startingDirections
-        |> Seq.map startAgent
-        |> Seq.map solve
-        |> Seq.minBy (fun agent -> agent.totalScore)
+//     { agent = agent
+//       newDirection = next.direction
+//       newLocation = next.location }
 
-    // TODO no
-    let historyChars =
-        solution.history
-        |> Seq.rev
-        |> Seq.pairwise
-        |> Seq.map (fun (a, b) ->
-            let c =
-                match b - a with
-                | { x = -1; y = 0 } -> '<'
-                | { x = 1; y = 0 } -> '>'
-                | { x = 0; y = -1 } -> '^'
-                | { x = 0; y = 1 } -> 'v'
-                | _ -> failwith (sprintf "impossible jump from %A to %A" a b)
+// let rec solve (agent: Agent) : Agent =
+//     printfn "TODO %A" agent
 
-            a, c)
-        |> Map
+//     if agent.location = goal then
+//         agent
+//     else
+//         solve (takeMove puzzle agent (nextMove agent))
 
-    // TODO no
-    for y in 0 .. (height - 1) do
-        for x in 0 .. (width - 1) do
-            let location = { x = x; y = y }
+// // take that first step automatically because the shortest path system assumes that ever step has taken at least one
+// let startAgent (direction: Direction) : Agent =
+//     let location = start + direction.vector
 
-            match historyChars |> Map.tryFind location with
-            | Some c -> printf "%c" c
-            | None -> printf "%d" puzzle[location]
+//     { location = location
+//       direction = direction
+//       stepsTakenInThatDirection = 1
+//       totalScore = puzzle[location]
+//       history = [ location; start ] }
 
-        printf "\n"
+// let solution =
+//     startingDirections
+//     |> Seq.map startAgent
+//     |> Seq.map solve
+//     |> Seq.minBy (fun agent -> agent.totalScore)
 
-    solution.totalScore
+// // TODO no
+// let historyChars =
+//     solution.history
+//     |> Seq.rev
+//     |> Seq.pairwise
+//     |> Seq.map (fun (a, b) ->
+//         let c =
+//             match b - a with
+//             | { x = -1; y = 0 } -> '<'
+//             | { x = 1; y = 0 } -> '>'
+//             | { x = 0; y = -1 } -> '^'
+//             | { x = 0; y = 1 } -> 'v'
+//             | _ -> failwith (sprintf "impossible jump from %A to %A" a b)
+
+//         a, c)
+//     |> Map
+
+// // TODO no
+// for y in 0 .. (height - 1) do
+//     for x in 0 .. (width - 1) do
+//         let location = { x = x; y = y }
+
+//         match historyChars |> Map.tryFind location with
+//         | Some c -> printf "%c" c
+//         | None -> printf "%d" puzzle[location]
+
+//     printf "\n"
+
+// solution.totalScore
