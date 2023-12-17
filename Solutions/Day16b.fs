@@ -150,29 +150,20 @@ let doIt (input: string) : int =
           height = height
           data = Array2D.init height width (fun y x -> input[y][x]) }
 
-    let mutable cachedResults: Map<Ray, Vector Set> = Map.empty
-
-    let rec solveAt (ray: Ray) : Vector Set =
-        match cachedResults.TryFind ray with
-        | Some existing -> existing
-        | None ->
-            // put a dummy value in the map
-            // this prevents infinite recursion if we have a loop and end up here again
-            // we'll replace this with the real value when we have all the children finished
-            cachedResults <- cachedResults |> Map.add ray (set [])
-
+    let rec uncachedSolve (ray: Ray) (visited: Ray Set) (results: Vector Set) : Ray Set * Vector Set =
+        if visited.Contains ray then
+            visited, results
+        else
+            let visited = visited |> Set.add ray
             let line = lineAt map ray
+            let results = Set.union results (line.points |> Set)
 
-            // combine the points on this line segment with the combined results of all children
-            let points =
-                Set.unionMany (
-                    (line.points |> Seq.filter (inBounds map) |> Set)
-                    :: (line.children |> List.map solveAt)
-                )
-
-            // we have the full list of points including children, so replace the dummy value with that
-            cachedResults <- cachedResults |> Map.add ray points
-            points
+            line.children
+            |> Seq.fold
+                (fun (visited, results) child ->
+                    let visited, results = uncachedSolve child visited results
+                    visited, results)
+                (visited, results)
 
     seq {
         for x in 0 .. (width - 1) do
@@ -193,6 +184,7 @@ let doIt (input: string) : int =
                 { origin = { x = width; y = y }
                   direction = West }
     }
-    |> Seq.map solveAt
-    |> Seq.map Set.count
+    |> Seq.map (fun ray ->
+        let _, results = uncachedSolve ray Set.empty Set.empty
+        results |> Set.filter (inBounds map) |> Set.count)
     |> Seq.max
