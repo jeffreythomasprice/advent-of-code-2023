@@ -4,7 +4,7 @@ open System
 open System.Text.RegularExpressions
 open System.Collections.Generic
 
-let doIt (input: string) : int =
+let doIt (input: string) : int64 =
     let lines =
         input.Split "\n"
         |> Array.toSeq
@@ -31,50 +31,59 @@ let doIt (input: string) : int =
             let numbers = m.Groups[2].Value.Split(',') |> Seq.map int |> Seq.toList
             s, pattern, numbers)
 
-    let rec checkInput (input: bool option list) (numbers: int list) : int =
-        match input, numbers with
-        // success, we reached the end of both lists
-        | [], [] -> 1
+    let mutable cache = Map.empty
 
-        // fail, we reached the end of the input but have more numbers to place
-        | [], _ -> 0
+    let rec checkInput (input: bool option list) (numbers: int list) : int64 =
+        match cache.TryFind(input, numbers) with
+        | Some result -> result
+        | None ->
+            let result: int64 =
+                match input, numbers with
+                // success, we reached the end of both lists
+                | [], [] -> 1
 
-        // we can skip gaps
-        | Some false :: remainingInput, _ -> checkInput remainingInput numbers
+                // fail, we reached the end of the input but have more numbers to place
+                | [], _ -> 0
 
-        // if we have a choice we take both paths and sum the results
-        | None :: remainingInput, _ ->
-            (checkInput (Some true :: remainingInput) numbers)
-            + (checkInput (Some false :: remainingInput) numbers)
+                // we can skip gaps
+                | Some false :: remainingInput, _ -> checkInput remainingInput numbers
 
-        // we must place a number here, but have no numbers remaining
-        | Some true :: _, [] -> 0
+                // if we have a choice we take both paths and sum the results
+                | None :: remainingInput, _ ->
+                    (checkInput (Some true :: remainingInput) numbers)
+                    + (checkInput (Some false :: remainingInput) numbers)
 
-        // we must place the next number here, and have one to check
-        | Some true :: _, nextNumber :: remainingNumbers ->
-            // we have to be able to place the number at the start, so the first few elements have to all be either Some true or None
-            if
-                input.Length >= nextNumber
-                && input |> Seq.take nextNumber |> Seq.forall (fun x -> x <> Some false)
-            then
-                // ok so it goes here, so skip that many
-                let remainingInput = input |> List.skip nextNumber
-                // if there is at least one remaining input, it has to be Some false or None, because it has to be a gap
-                if remainingInput.Length >= 1 then
-                    if remainingInput.Head = Some true then
-                        // the next one has to be part of a number, so this can't work
-                        0
+                // we must place a number here, but have no numbers remaining
+                | Some true :: _, [] -> 0
+
+                // we must place the next number here, and have one to check
+                | Some true :: _, nextNumber :: remainingNumbers ->
+                    // we have to be able to place the number at the start, so the first few elements have to all be either Some true or None
+                    if
+                        input.Length >= nextNumber
+                        && input |> Seq.take nextNumber |> Seq.forall (fun x -> x <> Some false)
+                    then
+                        // ok so it goes here, so skip that many
+                        let remainingInput = input |> List.skip nextNumber
+                        // if there is at least one remaining input, it has to be Some false or None, because it has to be a gap
+                        if remainingInput.Length >= 1 then
+                            if remainingInput.Head = Some true then
+                                // the next one has to be part of a number, so this can't work
+                                0
+                            else
+                                // the next one can be a gap, so skip that too
+                                let remainingInput = remainingInput |> List.skip 1
+                                // and recurse
+                                checkInput remainingInput remainingNumbers
+                        else
+                            // this was actually the entire input, we can just recurse to see if there are more numbers
+                            checkInput remainingInput remainingNumbers
                     else
-                        // the next one can be a gap, so skip that too
-                        let remainingInput = remainingInput |> List.skip 1
-                        // and recurse
-                        checkInput remainingInput remainingNumbers
-                else
-                    // this was actually the entire input, we can just recurse to see if there are more numbers
-                    checkInput remainingInput remainingNumbers
-            else
-                // the number can't fit at the start
-                0
+                        // the number can't fit at the start
+                        0
+
+            cache <- cache |> Map.add (input, numbers) result
+            result
 
     input
     |> Seq.indexed

@@ -7,7 +7,7 @@ open Solutions.Day12b
 [<Fact>]
 let sample () =
     Assert.Equal(
-        525152,
+        525152L,
         doIt
             """
 ???.### 1,1,3
