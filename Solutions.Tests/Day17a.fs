@@ -1,0 +1,32 @@
+module Solutions.Tests.Day17a
+
+open System
+open Xunit
+open Solutions.Day17a
+
+[<Fact>]
+let sample () =
+    Assert.Equal(
+        102,
+        doIt
+            """
+2413432311323
+3215453535623
+3255245654254
+3446585845452
+4546657867536
+1438598798454
+4457876987766
+3637877979653
+4654967986887
+4564679986453
+1224686865563
+2546548887735
+4322674655533
+            """
+    )
+
+[<Fact>]
+let actual () =
+    let file = IO.File.ReadAllText("test-data/day17a")
+    printfn "solution = %d" (doIt file)
