@@ -151,37 +151,58 @@ let shortestPathSolver (puzzle: PuzzleInput) (goal: Vector) : Vector -> Vector *
 
     fun location -> state[location]
 
+let rec allPossibleMoves (puzzle: PuzzleInput) (agent: Agent) (depth: int) : (Move * Agent) seq =
+    // find all the moves we can make here
+    // this is the move to make, and the agent that we would have if we took that move
+    let moves =
+        possibleMoves puzzle agent
+        |> Seq.map (fun move ->
+            let newAgent = takeMove puzzle agent move
+            move, newAgent)
+
+    if depth <= 0 then
+        // we're done, this is the possible moves
+        moves
+    else
+        // we can keep going
+        moves
+        |> Seq.collect (fun (move, agent) ->
+            // find all the moves we can make from this new location
+            allPossibleMoves puzzle agent (depth - 1)
+            // but still we only care about the move we make starting from where we are, so throw away the move result of that and keep ours
+            |> Seq.map (fun (_, agent) -> move, agent))
+
 let rec bestPossibleMove
     (puzzle: PuzzleInput)
     (agent: Agent)
+    (goal: Vector)
     (shortestPathSolver: Vector -> Vector * int)
-    : Move option =
-    // find out where we could go from here
-    // organize into a lookup table by the location
-    let possibleMoves =
-        possibleMoves puzzle agent
-        |> Seq.map (fun move -> move.newLocation, move)
-        |> Map
+    : Move =
+    // taking into account turning and max straight distanec, find all possible places we can be if we take a certain number of moves
+    let possibleMoves = allPossibleMoves puzzle agent 8
 
-    // if we have no choices then we're stuck here
-    if possibleMoves.IsEmpty then
-        None
+    if possibleMoves |> Seq.isEmpty then
+        failwith "solver is stuck"
     else
-        // find the best possible move ignoring the turns
-        let location, _ = shortestPathSolver agent.location
+        // filter that to just locations that contain our goal position
+        let solutions =
+            possibleMoves |> Seq.filter (fun (_, agent) -> agent.location = goal)
 
-        match possibleMoves.TryFind location with
-        // that's a valid move, just do that
-        | Some move -> Some move
-        | None ->
-            // otherwise, for each possible move we can make, do the shortest path ignoring turns for each of those locations and pick best
-            let move, _ =
+        let solution, _ =
+            if solutions |> Seq.isEmpty then
+                // no way to reach the goal with that many moves
+                // instead, take all the places we an reach and find the shortest path, not taking into account turns and striaght line distance
+                // pick the move that gets us closest that way
                 possibleMoves
-                |> Map.values
-                |> Seq.map (fun move -> move, shortestPathSolver move.newLocation)
-                |> Seq.minBy (fun (_, (_, score)) -> score)
+                |> Seq.minBy (fun (_, agent) ->
+                    let _, remainingDistanceEstimate = shortestPathSolver agent.location
+                    agent.totalScore + remainingDistanceEstimate)
+            else
+                // we can reach the goal
+                // break ties by picking the shortest path
+                solutions |> Seq.minBy (fun (_, agent) -> agent.totalScore)
 
-            Some move
+        solution
 
 let doIt (input: string) : int =
     let lines =
@@ -209,17 +230,15 @@ let doIt (input: string) : int =
     let shortestPath = shortestPathSolver puzzle goal
 
     let nextMove (agent: Agent) =
-        bestPossibleMove puzzle agent shortestPath
+        bestPossibleMove puzzle agent goal shortestPath
 
-    let rec solve (agent: Agent) : Agent option =
+    let rec solve (agent: Agent) : Agent =
         printfn "TODO %A" agent
 
         if agent.location = goal then
-            Some agent
+            agent
         else
-            match nextMove agent with
-            | Some move -> solve (takeMove puzzle agent move)
-            | None -> None
+            solve (takeMove puzzle agent (nextMove agent))
 
     let startAgent direction =
         { location = start
@@ -232,10 +251,9 @@ let doIt (input: string) : int =
         startingDirections
         |> Seq.map startAgent
         |> Seq.map solve
-        |> Seq.filter (fun agent -> agent.IsSome)
-        |> Seq.map (fun agent -> agent.Value)
         |> Seq.minBy (fun agent -> agent.totalScore)
 
+    // TODO no
     let historyChars =
         solution.history
         |> Seq.pairwise
@@ -251,6 +269,7 @@ let doIt (input: string) : int =
             a, c)
         |> Map
 
+    // TODO no
     for y in 0 .. (height - 1) do
         for x in 0 .. (width - 1) do
             let location = { x = x; y = y }
