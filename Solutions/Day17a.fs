@@ -109,8 +109,9 @@ type Score =
         | Start -> 0
         | Move(result, _) -> result
 
-let shortestPathSolver (puzzle: PuzzleInput) (start: Vector) : ShortestPathNode -> Score option =
+let shortestPathSolver (puzzle: PuzzleInput) (start: Vector) (goal: Vector) : ShortestPathNode -> Score option =
     // https://en.wikipedia.org/wiki/Dijkstra%27s_algorithm
+    // https://en.wikipedia.org/wiki/A*_search_algorithm
 
     // all possible nodes
     // looking up a node tells you where you must have been to get here
@@ -128,95 +129,115 @@ let shortestPathSolver (puzzle: PuzzleInput) (start: Vector) : ShortestPathNode 
                         // for all nother nodes we could enter that location from any direction, and we could have been travelling in that
                         // direction for 1 to 3 steps
                         for dir in [ North; South; East; West ] do
-                            for steps in 1..3 do
-                                yield
-                                    ShortestPathNode.Move
-                                        { location = location
-                                          direction = dir
-                                          stepsTakenInThatDirection = steps },
-                                    None
+                            // this is only possible if the node we would have come from is on the puzzle grid
+                            if puzzle.inBounds (location + dir.backwards.vector) then
+                                for steps in 1..3 do
+                                    yield
+                                        ShortestPathNode.Move
+                                            { location = location
+                                              direction = dir
+                                              stepsTakenInThatDirection = steps },
+                                        None
         }
         |> Map
 
     let mutable remaining = Map.keys state |> Set
 
-    while not remaining.IsEmpty do
-        // filter nodes by the ones in our queue to check, and keep only the ones that we know we can reach
-        let possible =
+    let mutable remainingGoalNodes =
+        Map.keys state
+        |> Seq.filter (fun node ->
+            match node with
+            | ShortestPathNode.Move move -> move.location = goal
+            | ShortestPathNode.Start _ -> false)
+        |> Set
+
+    // iterate while we have possible goal nodes remaining
+    // we can stop once we have all possible ways to reach the goal node solved
+    while not remainingGoalNodes.IsEmpty do
+        printfn
+            "TODO num remaining nodes? %d, num remaining nodes that are goal nodes? %d"
+            remaining.Count
+            remainingGoalNodes.Count
+
+        let current, currentScore, _ =
             remaining
-            |> Seq.map (fun location -> location, state[location])
-            |> Seq.filter (fun (_, score) -> score.IsSome)
-            |> Seq.map (fun (location, score) -> location, score.Value)
+            |> Seq.map (fun location ->
+                let score = state[location]
 
-        // if we have nothing in this set it means that all remaining nodes to consider have no score associated with them, so we haven't
-        // reached them yet
-        // so early exit, we can't possibly get to any of these
-        if possible |> Seq.isEmpty then
-            remaining <- Set.empty
-        else
-            // of our list to check, get the one with the lowest current score
-            let current, currentScore = possible |> Seq.minBy (fun (_, score) -> score.intScore)
+                let intScore =
+                    match score with
+                    | Some score ->
+                        // when picking a next node, also take into account the distance to the goal
+                        // that is, nodes that are really far away from the goal are deprioritized over possible solutions that are really close
+                        let currentLocation =
+                            match location with
+                            | ShortestPathNode.Start start -> start
+                            | ShortestPathNode.Move move -> move.location
 
-            // remove this node from our list, we are now examining it and don't need to do so again
-            remaining <- remaining |> Set.remove current
+                        let estimateToGoal = currentLocation.distanceTo goal
+                        score.intScore + estimateToGoal
+                    | None -> Int32.MaxValue
 
-            // find all the other nodes that could have this node as their previous step, i.e. all the next nodes
-            let neighbors =
-                match current with
-                // if we're at the special start node, then the next nodes all the locations we go from here,
-                // where we'll now have been moving for 1 step
-                | ShortestPathNode.Start location ->
-                    [ North; South; East; West ]
-                    |> Seq.map (fun dir ->
-                        { location = location + dir.vector
-                          direction = dir
-                          stepsTakenInThatDirection = 1 })
-                // otherwise, we can either turn left or right,
-                // if this node isn't reached by travelling too far in a straight line, we can keep going straight too
-                | ShortestPathNode.Move move ->
-                    let sides = [ move.direction.left; move.direction.right ]
+                location, score, intScore)
+            |> Seq.minBy (fun (_, _, x) -> x)
 
-                    let directions =
-                        if move.stepsTakenInThatDirection < 3 then
-                            move.direction :: sides
-                        else
-                            sides
+        let currentScore = currentScore.Value
 
-                    directions
-                    |> Seq.map (fun dir ->
-                        { location = move.location + dir.vector
-                          direction = dir
-                          stepsTakenInThatDirection =
-                            if dir = move.direction then
-                                move.stepsTakenInThatDirection + 1
-                            else
-                                1 })
+        // remove this node from our list, we are now examining it and don't need to do so again
+        remaining <- remaining |> Set.remove current
+        remainingGoalNodes <- remainingGoalNodes |> Set.remove current
 
-            // some additional filtering to reject bad nodes
-            let neighbors =
-                neighbors
-                // filter that by only those new nodes that are actually on the map
-                |> Seq.filter (fun neighbor -> puzzle.inBounds neighbor.location)
-                // we only update nodes that aren't "done"
-                |> Seq.filter (fun neighbor -> Set.contains (ShortestPathNode.Move neighbor) remaining)
+        // find all the other nodes that could have this node as their previous step, i.e. all the next nodes
+        let neighbors =
+            (match current with
+             // if we're at the special start node, then the next nodes all the locations we go from here,
+             // where we'll now have been moving for 1 step
+             | ShortestPathNode.Start location ->
+                 [ North; South; East; West ]
+                 |> Seq.map (fun dir ->
+                     { location = location + dir.vector
+                       direction = dir
+                       stepsTakenInThatDirection = 1 })
+             // otherwise, we can either turn left or right,
+             // if this node isn't reached by travelling too far in a straight line, we can keep going straight too
+             | ShortestPathNode.Move move ->
+                 let sides = [ move.direction.left; move.direction.right ]
 
-            for neighbor in neighbors do
-                // the score at the neighbor would be the score at this node plus how much it would cost to get there
-                // i.e. the puzzle value at the destination
-                let proposedScore = currentScore.intScore + puzzle[neighbor.location]
-                // the current score at  that neighbor
-                let neighborScore = state[ShortestPathNode.Move neighbor]
+                 let directions =
+                     if move.stepsTakenInThatDirection < 3 then
+                         move.direction :: sides
+                     else
+                         sides
 
-                if
-                    match neighborScore with
-                    // only replace if this is a better route
-                    | Some neighborScore -> proposedScore < neighborScore.intScore
-                    // no current route to the neighbor, so this will always win
-                    | None -> true
-                then
-                    state <-
-                        state
-                        |> Map.add (ShortestPathNode.Move neighbor) (Some(Move(proposedScore, current)))
+                 directions
+                 |> Seq.map (fun dir ->
+                     { location = move.location + dir.vector
+                       direction = dir
+                       stepsTakenInThatDirection =
+                         if dir = move.direction then
+                             move.stepsTakenInThatDirection + 1
+                         else
+                             1 }))
+            // we only update nodes that aren't "done"
+            |> Seq.filter (fun neighbor -> Set.contains (ShortestPathNode.Move neighbor) remaining)
+
+        for neighbor in neighbors do
+            // the score at the neighbor would be the score at this node plus how much it would cost to get there
+            // i.e. the puzzle value at the destination
+            let proposedScore = currentScore.intScore + puzzle[neighbor.location]
+            // the current score at  that neighbor
+            let neighborScore = state[ShortestPathNode.Move neighbor]
+
+            if
+                match neighborScore with
+                // only replace if this is a better route
+                | Some neighborScore -> proposedScore < neighborScore.intScore
+                // no current route to the neighbor, so this will always win
+                | None -> true
+            then
+                state <-
+                    state
+                    |> Map.add (ShortestPathNode.Move neighbor) (Some(Move(proposedScore, current)))
 
     // the actual lookup is getting us the results at each node
     // so this is the next node, working backwards from somewhere to the start node
@@ -245,7 +266,7 @@ let doIt (input: string) : int =
     let start = { x = 0; y = 0 }
     let goal = { x = width - 1; y = height - 1 }
 
-    let shortestPath = shortestPathSolver puzzle start
+    let shortestPath = shortestPathSolver puzzle start goal
 
     [ North; South; East; West ]
     |> Seq.collect (fun dir ->
