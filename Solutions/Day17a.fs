@@ -141,7 +141,28 @@ let shortestPathSolver (puzzle: PuzzleInput) (start: Vector) (goal: Vector) : Sh
         }
         |> Map
 
-    let mutable remaining = Map.keys state |> Set
+    let estimateScore (location: ShortestPathNode) : Score * int =
+        let score = state[location].Value
+
+        let estimate =
+            // when picking a next node, also take into account the distance to the goal
+            // that is, nodes that are really far away from the goal are deprioritized over possible solutions that are really close
+            let currentLocation =
+                match location with
+                | ShortestPathNode.Start start -> start
+                | ShortestPathNode.Move move -> move.location
+
+            let estimateToGoal = currentLocation.distanceTo goal
+            score.intScore + estimateToGoal
+
+        score, estimate
+
+    // keep a list of nodes to check, starting with the one we know a score for
+    // the first value is the actual score in the state map
+    // the second value is the estimate of the total score of a path through here to the goal
+    let mutable remaining =
+        [ ShortestPathNode.Start start, estimateScore (ShortestPathNode.Start start) ]
+        |> Map
 
     let mutable remainingGoalNodes =
         Map.keys state
@@ -151,40 +172,39 @@ let shortestPathSolver (puzzle: PuzzleInput) (start: Vector) (goal: Vector) : Sh
             | ShortestPathNode.Start _ -> false)
         |> Set
 
+    // TODO no time
+    let mutable lastTick = DateTime.Now
+
     // iterate while we have possible goal nodes remaining
     // we can stop once we have all possible ways to reach the goal node solved
     while not remainingGoalNodes.IsEmpty do
-        printfn
-            "TODO num remaining nodes? %d, num remaining nodes that are goal nodes? %d"
-            remaining.Count
-            remainingGoalNodes.Count
+        // TODO no time
+        let now = DateTime.Now
+
+        if (now - lastTick).TotalSeconds >= 2 then
+            printfn
+                "TODO num remaining nodes? %d, num remaining nodes that are goal nodes? %d"
+                remaining.Count
+                remainingGoalNodes.Count
+
+            lastTick <- now
 
         let current, currentScore, _ =
-            remaining
-            |> Seq.map (fun location ->
-                let score = state[location]
-
-                let intScore =
-                    match score with
-                    | Some score ->
-                        // when picking a next node, also take into account the distance to the goal
-                        // that is, nodes that are really far away from the goal are deprioritized over possible solutions that are really close
-                        let currentLocation =
-                            match location with
-                            | ShortestPathNode.Start start -> start
-                            | ShortestPathNode.Move move -> move.location
-
-                        let estimateToGoal = currentLocation.distanceTo goal
-                        score.intScore + estimateToGoal
-                    | None -> Int32.MaxValue
-
-                location, score, intScore)
-            |> Seq.minBy (fun (_, _, x) -> x)
-
-        let currentScore = currentScore.Value
+            (remaining
+             |> Map.fold
+                 (fun (result: (ShortestPathNode * Score * int) option) location (score, estimate) ->
+                     match result with
+                     | Some(existingLocation, existingScore, existingEstimate) ->
+                         if existingEstimate < estimate then
+                             Some(existingLocation, existingScore, existingEstimate)
+                         else
+                             Some(location, score, estimate)
+                     | None -> Some(location, score, estimate))
+                 None)
+                .Value
 
         // remove this node from our list, we are now examining it and don't need to do so again
-        remaining <- remaining |> Set.remove current
+        remaining <- remaining |> Map.remove current
         remainingGoalNodes <- remainingGoalNodes |> Set.remove current
 
         // find all the other nodes that could have this node as their previous step, i.e. all the next nodes
@@ -218,8 +238,8 @@ let shortestPathSolver (puzzle: PuzzleInput) (start: Vector) (goal: Vector) : Sh
                              move.stepsTakenInThatDirection + 1
                          else
                              1 }))
-            // we only update nodes that aren't "done"
-            |> Seq.filter (fun neighbor -> Set.contains (ShortestPathNode.Move neighbor) remaining)
+            // only keep those neighbors that are actually on the puzzle grid
+            |> Seq.filter (fun neighbor -> state.ContainsKey(ShortestPathNode.Move neighbor))
 
         for neighbor in neighbors do
             // the score at the neighbor would be the score at this node plus how much it would cost to get there
@@ -235,9 +255,15 @@ let shortestPathSolver (puzzle: PuzzleInput) (start: Vector) (goal: Vector) : Sh
                 // no current route to the neighbor, so this will always win
                 | None -> true
             then
+                // going through the current node is better than however we were getting to this neighbor previously
+                // remember this new route
                 state <-
                     state
                     |> Map.add (ShortestPathNode.Move neighbor) (Some(Move(proposedScore, current)))
+                // since we updated this neighbor, we have to check it again
+                remaining <-
+                    remaining
+                    |> Map.add (ShortestPathNode.Move neighbor) (estimateScore (ShortestPathNode.Move neighbor))
 
     // the actual lookup is getting us the results at each node
     // so this is the next node, working backwards from somewhere to the start node
