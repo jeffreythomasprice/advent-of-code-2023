@@ -1,4 +1,4 @@
-module Solutions.Day17a
+module Solutions.Day17b
 
 open System
 open System.Text.RegularExpressions
@@ -11,6 +11,8 @@ type Vector =
     static member (+)(a: Vector, b: Vector) : Vector = { x = a.x + b.x; y = a.y + b.y }
 
     static member (-)(a: Vector, b: Vector) : Vector = { x = a.x - b.x; y = a.y - b.y }
+
+    static member (*)(a: Vector, b: int) : Vector = { x = a.x * b; y = a.y * b }
 
     member this.distanceTo(other: Vector) : int =
         let d = other - this
@@ -127,11 +129,13 @@ let shortestPathSolver (puzzle: PuzzleInput) (start: Vector) (goal: Vector) : Sh
                         yield ShortestPathNode.Start location, Some Start
                     else
                         // for all other nodes we could enter that location from any direction, and we could have been travelling in that
-                        // direction for 1 to 3 steps
+                        // direction for 4 to 10 steps
                         for dir in [ North; South; East; West ] do
-                            // this is only possible if the node we would have come from is on the puzzle grid
-                            if puzzle.inBounds (location + dir.backwards.vector) then
-                                for steps in 1..3 do
+                            for steps in 1..10 do
+                                // this is only possible if the node we would have come from is on the puzzle grid
+                                let otherLocation = location + dir.backwards.vector * steps
+
+                                if puzzle.inBounds otherLocation then
                                     yield
                                         ShortestPathNode.Move
                                             { location = location
@@ -168,13 +172,18 @@ let shortestPathSolver (puzzle: PuzzleInput) (start: Vector) (goal: Vector) : Sh
         Map.keys state
         |> Seq.filter (fun node ->
             match node with
-            | ShortestPathNode.Move move -> move.location = goal
+            | ShortestPathNode.Move move ->
+                move.location = goal
+                && move.stepsTakenInThatDirection >= 4
+                && move.stepsTakenInThatDirection <= 10
             | ShortestPathNode.Start _ -> false)
         |> Set
 
     // iterate while we have possible goal nodes remaining
     // we can stop once we have all possible ways to reach the goal node solved
-    while not remainingGoalNodes.IsEmpty do
+    while not remainingGoalNodes.IsEmpty && not remaining.IsEmpty do
+        printfn "TODO remaining count = %d, remaining goal count = %d" remaining.Count remainingGoalNodes.Count
+
         let current, currentScore, _ =
             (remaining
              |> Map.fold
@@ -207,15 +216,19 @@ let shortestPathSolver (puzzle: PuzzleInput) (start: Vector) (goal: Vector) : Sh
              // otherwise, we can either turn left or right,
              // if this node isn't reached by travelling too far in a straight line, we can keep going straight too
              | ShortestPathNode.Move move ->
-                 let sides = [ move.direction.left; move.direction.right ]
-
-                 let directions =
-                     if move.stepsTakenInThatDirection < 3 then
-                         move.direction :: sides
+                 let sides =
+                     if move.stepsTakenInThatDirection >= 4 then
+                         [ move.direction.left; move.direction.right ]
                      else
-                         sides
+                         []
 
-                 directions
+                 let forward =
+                     if move.stepsTakenInThatDirection < 10 then
+                         [ move.direction ]
+                     else
+                         []
+
+                 (forward @ sides)
                  |> Seq.map (fun dir ->
                      { location = move.location + dir.vector
                        direction = dir
@@ -282,7 +295,7 @@ let doIt (input: string) : int =
 
     [ North; South; East; West ]
     |> Seq.collect (fun dir ->
-        seq { 1..3 }
+        seq { 4..10 }
         |> Seq.map (fun steps ->
             ShortestPathNode.Move
                 { location = goal
