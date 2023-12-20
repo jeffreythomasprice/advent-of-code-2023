@@ -111,6 +111,11 @@ type Score =
         | Start -> 0
         | Move(result, _) -> result
 
+type ScoreQueueItem =
+    { location: ShortestPathNode
+      score: Score
+      estimate: int }
+
 let shortestPathSolver (puzzle: PuzzleInput) (start: Vector) (goal: Vector) : ShortestPathNode -> Score option =
     // https://en.wikipedia.org/wiki/Dijkstra%27s_algorithm
     // https://en.wikipedia.org/wiki/A*_search_algorithm
@@ -145,7 +150,7 @@ let shortestPathSolver (puzzle: PuzzleInput) (start: Vector) (goal: Vector) : Sh
         }
         |> Map
 
-    let estimateScore (location: ShortestPathNode) : Score * int =
+    let estimateScore (location: ShortestPathNode) : ScoreQueueItem =
         let score = state[location].Value
 
         let estimate =
@@ -159,14 +164,23 @@ let shortestPathSolver (puzzle: PuzzleInput) (start: Vector) (goal: Vector) : Sh
             let estimateToGoal = currentLocation.distanceTo goal
             score.intScore + estimateToGoal
 
-        score, estimate
+        { location = location
+          score = score
+          estimate = estimate }
 
     // keep a list of nodes to check, starting with the one we know a score for
     // the first value is the actual score in the state map
     // the second value is the estimate of the total score of a path through here to the goal
     let mutable remaining =
-        [ ShortestPathNode.Start start, estimateScore (ShortestPathNode.Start start) ]
-        |> Map
+        SortedSet(
+            [ estimateScore (ShortestPathNode.Start start) ],
+            Comparer.Create(
+                Comparison<ScoreQueueItem>(fun a b ->
+                    // sort low estimate first, break ties with default struct comparison
+                    let estimateDiff = a.estimate - b.estimate
+                    if estimateDiff <> 0 then estimateDiff else compare a b)
+            )
+        )
 
     let mutable remainingGoalNodes =
         Map.keys state
@@ -181,30 +195,17 @@ let shortestPathSolver (puzzle: PuzzleInput) (start: Vector) (goal: Vector) : Sh
 
     // iterate while we have possible goal nodes remaining
     // we can stop once we have all possible ways to reach the goal node solved
-    while not remainingGoalNodes.IsEmpty && not remaining.IsEmpty do
-        printfn "TODO remaining count = %d, remaining goal count = %d" remaining.Count remainingGoalNodes.Count
+    while not remainingGoalNodes.IsEmpty && remaining.Count > 0 do
+        // get the next item in the queue and remove it
+        let current = remaining.Min
+        remaining.Remove(current) |> ignore
 
-        let current, currentScore, _ =
-            (remaining
-             |> Map.fold
-                 (fun (result: (ShortestPathNode * Score * int) option) location (score, estimate) ->
-                     match result with
-                     | Some(existingLocation, existingScore, existingEstimate) ->
-                         if existingEstimate < estimate then
-                             Some(existingLocation, existingScore, existingEstimate)
-                         else
-                             Some(location, score, estimate)
-                     | None -> Some(location, score, estimate))
-                 None)
-                .Value
-
-        // remove this node from our list, we are now examining it and don't need to do so again
-        remaining <- remaining |> Map.remove current
-        remainingGoalNodes <- remainingGoalNodes |> Set.remove current
+        // if this is a goal node we also keep track of that
+        remainingGoalNodes <- remainingGoalNodes |> Set.remove current.location
 
         // find all the other nodes that could have this node as their previous step, i.e. all the next nodes
         let neighbors =
-            (match current with
+            (match current.location with
              // if we're at the special start node, then the next nodes all the locations we go from here,
              // where we'll now have been moving for 1 step
              | ShortestPathNode.Start location ->
@@ -243,7 +244,7 @@ let shortestPathSolver (puzzle: PuzzleInput) (start: Vector) (goal: Vector) : Sh
         for neighbor in neighbors do
             // the score at the neighbor would be the score at this node plus how much it would cost to get there
             // i.e. the puzzle value at the destination
-            let proposedScore = currentScore.intScore + puzzle[neighbor.location]
+            let proposedScore = current.score.intScore + puzzle[neighbor.location]
             // the current score at  that neighbor
             let neighborScore = state[ShortestPathNode.Move neighbor]
 
@@ -258,11 +259,9 @@ let shortestPathSolver (puzzle: PuzzleInput) (start: Vector) (goal: Vector) : Sh
                 // remember this new route
                 state <-
                     state
-                    |> Map.add (ShortestPathNode.Move neighbor) (Some(Move(proposedScore, current)))
+                    |> Map.add (ShortestPathNode.Move neighbor) (Some(Move(proposedScore, current.location)))
                 // since we updated this neighbor, we have to check it again
-                remaining <-
-                    remaining
-                    |> Map.add (ShortestPathNode.Move neighbor) (estimateScore (ShortestPathNode.Move neighbor))
+                remaining.Add(estimateScore (ShortestPathNode.Move neighbor)) |> ignore
 
     // the actual lookup is getting us the results at each node
     // so this is the next node, working backwards from somewhere to the start node
