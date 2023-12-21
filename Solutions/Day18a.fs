@@ -149,7 +149,18 @@ let doIt (input: string) : int =
         printfn ""
 
     for y in grid.bounds.top .. (grid.bounds.bottom - 1) do
-        // TODO doesn't handle horizontal lines correctly
+        (*
+            TODO doesn't handle horizontal lines correctly
+
+            possible new idea:
+            run through the instructions again and build a list of line segments as we go
+            filter line segment list by keeping only the vertical lines
+            sort top to bottom
+            for every unique y coordinate find all the lines that the horizontal line at that y intersects the vertical lines
+            sort the resulting x coordinates
+            pair them, so leftmost 2, then the 2nd-leftmost 2, etc.
+            each range is going to be filled in
+        *)
         let edges =
             seq {
                 for x in grid.bounds.left .. (grid.bounds.right - 1) do
