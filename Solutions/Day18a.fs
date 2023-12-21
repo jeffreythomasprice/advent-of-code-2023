@@ -121,6 +121,12 @@ type Grid =
             let v = v - this.bounds.origin
             this.data[v.y, v.x] <- value
 
+let rec everyTwo (input: 't list) =
+    match input with
+    | [] -> []
+    | a :: b :: tail -> (a, b) :: (everyTwo tail)
+    | _ -> failwith "odd number of elements"
+
 let doIt (input: string) : int =
     let lines =
         input.Split "\n"
@@ -213,7 +219,7 @@ let doIt (input: string) : int =
             current <- current.Tail
 
         // find pairs of x coordiantes, left to right
-        let ranges = current |> List.map (fun x -> x.x) |> List.sort |> List.pairwise
+        let ranges = current |> List.map (fun x -> x.x) |> List.sort |> everyTwo
 
         for (left, right) in ranges do
             for x in left..right do
