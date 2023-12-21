@@ -34,6 +34,7 @@ type Cell =
     | Empty
     | Initial
     | Colored of string
+    | Interior
 
 type Rectangle =
     { origin: Vector
@@ -62,6 +63,31 @@ type Rectangle =
 
         { origin = { x = left; y = top }
           size = { x = right - left; y = bottom - top } }
+
+type Horizontal =
+    { left: int
+      right: int
+      y: int }
+
+    member this.contains(v: Vector) =
+        v.x >= this.left && v.x < this.right && v.y = this.y
+
+type Vertical =
+    { top: int
+      bottom: int
+      x: int }
+
+    member this.contains(v: Vector) =
+        v.y >= this.top && v.y < this.bottom && v.x = this.x
+
+type LineSegment =
+    | Horizontal of Horizontal
+    | Vertical of Vertical
+
+    member this.contains(v: Vector) =
+        match this with
+        | Horizontal x -> x.contains v
+        | Vertical x -> x.contains v
 
 type Grid =
     { mutable bounds: Rectangle
@@ -120,19 +146,82 @@ let doIt (input: string) : int =
             { direction = direction
               steps = steps
               color = color })
+        |> Seq.toList
 
     let grid = Grid.init Initial
 
     let mutable currentLocation = grid.bounds.origin
+    let mutable lines = []
 
     input
     |> Seq.iter (fun instruction ->
+        let first = currentLocation
+
         (Seq.replicate instruction.steps instruction.direction.vector)
         |> Seq.iter (fun delta ->
             currentLocation <- currentLocation + delta
-            grid[currentLocation] <- Colored instruction.color))
+            grid[currentLocation] <- Colored instruction.color)
+
+        let second = currentLocation
+
+        let left = min first.x second.x
+        let right = max first.x second.x
+        let top = min first.y second.y
+        let bottom = max first.y second.y
+
+        lines <-
+            (match instruction.direction with
+             | Up
+             | Down ->
+                 Vertical
+                     { top = top
+                       bottom = bottom
+                       x = currentLocation.x }
+             | Left
+             | Right ->
+                 Horizontal
+                     { left = left
+                       right = right
+                       y = currentLocation.y })
+            :: lines)
+
+    // all the vertical lines, sorted by increasing top
+    let mutable verticalLines =
+        lines
+        |> Seq.map (fun x ->
+            match x with
+            | Horizontal _ -> None
+            | Vertical x -> Some x)
+        |> Seq.filter (fun x -> x.IsSome)
+        |> Seq.map (fun x -> x.Value)
+        |> Seq.toList
+        |> List.sortBy (fun x -> x.top)
+
+    let mutable current = []
+
+    for y in grid.bounds.top .. (grid.bounds.bottom - 1) do
+        // remove from remaining and add to current as long as y >= head.top
+        while not verticalLines.IsEmpty
+              && verticalLines.Head.contains { x = verticalLines.Head.x; y = y } do
+            current <- verticalLines.Head :: current
+            verticalLines <- verticalLines.Tail
+
+        // remove from current as long as y >= head.bottom
+        current <- current |> List.sortBy (fun x -> x.bottom)
+
+        while not current.IsEmpty && not (current.Head.contains { x = current.Head.x; y = y }) do
+            current <- current.Tail
+
+        // find pairs of x coordiantes, left to right
+        let ranges = current |> List.map (fun x -> x.x) |> List.sort |> List.pairwise
+
+        for (left, right) in ranges do
+            for x in left..right do
+                grid[{ x = x; y = y }] <- Interior
 
     printfn "final grid bounds = %A" grid.bounds
+
+    let mutable filledInCount = 0
 
     for y in grid.bounds.top .. (grid.bounds.bottom - 1) do
         for x in grid.bounds.left .. (grid.bounds.right - 1) do
@@ -141,37 +230,14 @@ let doIt (input: string) : int =
             let c =
                 match grid[v] with
                 | Initial
-                | Colored _ -> '#'
+                | Colored _
+                | Interior ->
+                    filledInCount <- filledInCount + 1
+                    '#'
                 | Empty -> '.'
 
             printf "%c" c
 
         printfn ""
 
-    for y in grid.bounds.top .. (grid.bounds.bottom - 1) do
-        (*
-            TODO doesn't handle horizontal lines correctly
-
-            possible new idea:
-            run through the instructions again and build a list of line segments as we go
-            filter line segment list by keeping only the vertical lines
-            sort top to bottom
-            for every unique y coordinate find all the lines that the horizontal line at that y intersects the vertical lines
-            sort the resulting x coordinates
-            pair them, so leftmost 2, then the 2nd-leftmost 2, etc.
-            each range is going to be filled in
-        *)
-        let edges =
-            seq {
-                for x in grid.bounds.left .. (grid.bounds.right - 1) do
-                    let v = { x = x; y = y }
-
-                    match grid[v] with
-                    | Initial
-                    | Colored _ -> yield v
-                    | Empty -> ()
-            }
-
-        printfn "TODO y = %d, edges = %A" y (edges |> Seq.toList)
-
-    0
+    filledInCount
