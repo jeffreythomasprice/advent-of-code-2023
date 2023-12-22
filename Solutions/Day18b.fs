@@ -95,6 +95,32 @@ let rec everyTwo (input: 't list) =
     | a :: b :: tail -> (a, b) :: (everyTwo tail)
     | _ -> failwith "odd number of elements"
 
+type Range =
+    { first: int64
+      last: int64 }
+
+    member this.subtract(others: Range list) : Range seq =
+        match others with
+        | [] -> [ this ]
+        | other :: remainder ->
+            if this.first > other.last || this.last < other.first then
+                [ this ]
+            else if this.first >= other.first && this.last <= other.last then
+                []
+            else if this.first < other.first && this.last > other.last then
+                [ { first = this.first
+                    last = other.first - 1L }
+                  { first = other.last + 1L
+                    last = this.last } ]
+            else if this.first < other.first then
+                [ { first = this.first
+                    last = other.first - 1L } ]
+            else
+                [ { first = other.last + 1L
+                    last = this.last } ]
+            |> Seq.collect (fun portion -> portion.subtract remainder)
+
+
 let doIt (input: string) : int64 =
     let lines =
         input.Split "\n"
@@ -102,6 +128,24 @@ let doIt (input: string) : int64 =
         |> Seq.map (fun x -> x.Trim())
         |> Seq.filter (fun x -> not (String.IsNullOrWhiteSpace x))
 
+    // TODO JEFF put the real parser back
+    // let input =
+    //     lines
+    //     |> Seq.map (fun line -> Regex("^([UDLR]) ([0-9]+) \(#([0-9a-f]{6})\)$").Match(line))
+    //     |> Seq.map (fun m ->
+    //         let direction =
+    //             match m.Groups[1].Value with
+    //             | "U" -> Up
+    //             | "D" -> Down
+    //             | "L" -> Left
+    //             | "R" -> Right
+    //             | _ -> failwith "bad enum"
+
+    //         let steps = m.Groups[2].Value |> int
+    //         let color = m.Groups[3].Value
+
+    //         { direction = direction; steps = steps })
+    //     |> Seq.toList
     let input =
         lines
         |> Seq.map (fun line -> Regex("^[UDLR] [0-9]+ \(#([0-9a-f]{5})([0-3])\)$").Match(line))
@@ -164,25 +208,10 @@ let doIt (input: string) : int64 =
 
     let uniqueY = allPoints |> Seq.map (fun v -> v.y) |> SortedSet |> Seq.toList
 
-    (*
-        TODO not quite
-
-        I think I'm not counting the bottom horizontal lines and I need to be
-
-        e.g. the horizontal line in the middle right wouldn't be counted
-        |              |
-        |              |
-        |      +-------+
-        |      |
-        |      |
-        +------+
-    *)
-
-    let everythingButTheBottomRow =
+    let yAndXs =
         uniqueY
-        |> Seq.pairwise
-        |> Seq.map (fun (top, bottom) ->
-            let matchingLines =
+        |> Seq.map (fun y ->
+            let allX =
                 lines
                 |> Seq.map (fun line ->
                     match line with
@@ -190,39 +219,63 @@ let doIt (input: string) : int64 =
                     | Vertical line ->
                         let lineTop = min line.first line.second
                         let lineBottom = max line.first line.second
-
-                        if lineTop <= top && top < lineBottom then
-                            Some line
-                        else
-                            None)
+                        if lineTop <= y && y < lineBottom then Some line else None)
                 |> Seq.filter (fun x -> x.IsSome)
                 |> Seq.map (fun x -> x.Value)
+                |> Seq.map (fun line -> line.x)
+                |> Seq.toList
+                |> List.sort
 
-            matchingLines
-            |> Seq.map (fun line -> line.x)
-            |> Seq.toList
-            |> List.sort
+            y, allX)
+
+    yAndXs
+    |> Seq.pairwise
+    |> Seq.map (fun ((top, topX), (bottom, bottomX)) ->
+        let mainAreas =
+            topX
             |> everyTwo
             |> Seq.map (fun (left, right) ->
                 printfn "TODO top = %d, bottom = %d, left = %d, right = %d" top bottom left right
                 (bottom - top) * (right - left + 1L))
-            |> Seq.sum)
-        |> Seq.sum
+            |> Seq.sum
 
-    let bottomRow =
-        lines
-        |> Seq.map (fun line ->
-            match line with
-            | Horizontal line -> if line.y = (uniqueY |> List.last) then Some line else None
-            | Vertical _ -> None)
-        |> Seq.filter (fun x -> x.IsSome)
-        |> Seq.map (fun x -> x.Value)
-        |> Seq.map (fun line ->
-            let y = line.y
-            let left = min line.first line.second
-            let right = max line.first line.second
-            printfn "TODO bottom line = %A" line
-            right - left + 1L)
-        |> Seq.sum
+        let horizontalLinesAtTheBottom =
+            lines
+            |> Seq.map (fun line ->
+                match line with
+                | Horizontal line -> if line.y = bottom then Some line else None
+                | Vertical _ -> None)
+            |> Seq.filter (fun x -> x.IsSome)
+            |> Seq.map (fun x -> x.Value)
+            |> Seq.map (fun line ->
+                (*
+                    TODO this is the only thing wrong
+                    we double count horizontal edges that on the area region
+                    need to count all horizontals, but only the portions not covered by pairwise bottomX
 
-    everythingButTheBottomRow + bottomRow
+                    width += line subtract (union of all horizontal edges formed by pairwise bottomX)
+                *)
+                { first = min line.first line.second
+                  last = max line.first line.second }
+                    .subtract (
+                        bottomX
+                        |> Seq.pairwise
+                        |> Seq.map (fun (left, right) -> { first = left; last = right })
+                        |> Seq.toList
+                    )
+                |> Seq.map (fun range ->
+                    let result = range.last - range.first + 1L
+
+                    printfn
+                        "TODO bottomY = %d, horizontal range = %d, %d, result = %d"
+                        bottom
+                        range.first
+                        range.last
+                        result
+
+                    result)
+                |> Seq.sum)
+            |> Seq.sum
+
+        mainAreas + horizontalLinesAtTheBottom)
+    |> Seq.sum
