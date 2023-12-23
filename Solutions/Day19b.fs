@@ -50,8 +50,8 @@ type PossibleParts =
     member this.count() =
         this.data
         |> Map.toSeq
-        |> Seq.map (fun (name, x) -> name, x |> Seq.map (fun x -> x.last - x.first + 1) |> Seq.sum)
-        |> Map
+        |> Seq.map (fun (_, x) -> x |> Seq.map (fun x -> (x.last |> int64) - (x.first |> int64) + 1L) |> Seq.sum)
+        |> Seq.fold (fun a b -> a * b) 1L
 
 type Rule =
     { name: string
@@ -179,33 +179,26 @@ let doIt (input: string) : int64 =
               defaultTarget = defaultTarget })
         |> Map
 
-    let mutable state =
-        [ ("in",
-           { data =
-               [ ("x", [ { first = 1; last = 4000 } ])
-                 ("m", [ { first = 1; last = 4000 } ])
-                 ("a", [ { first = 1; last = 4000 } ])
-                 ("s", [ { first = 1; last = 4000 } ]) ]
-               |> Map }) ]
-        |> Map
+    let rec count (workflowName: string) (parts: PossibleParts) : int64 =
+        let workflow = workflows[workflowName]
+        let results = workflow.eval parts
 
-    let isDone () =
-        match state.Keys |> Seq.tryFind (fun x -> x <> "A" && x <> "R") with
-        | Some _ -> false
-        | None -> true
+        (results.TryFind "A"
+         |> Option.map (fun parts -> parts.count ())
+         |> Option.defaultValue 0L)
+        + (results
+           |> Map.toSeq
+           |> Seq.filter (fun (name, _) -> name <> "A" && name <> "R")
+           |> Seq.map (fun (name, child) -> count name child)
+           |> Seq.sum)
 
-    while not (isDone ()) do
-        let workflowName = state.Keys |> Seq.find (fun x -> x <> "A" && x <> "R")
-        let results = workflows[workflowName].eval state[workflowName]
-        state <- state |> Map.remove workflowName
+    // TODO too high, 169280328932458
 
-        results
-        |> Map.toSeq
-        |> Seq.iter (fun (workflowName, results) -> state <- combine state workflowName results)
-
-    let results = state["A"].count ()
-
-    let results =
-        results |> Map.toSeq |> Seq.map (fun (key, value) -> key, value |> int64) |> Map
-
-    results["x"] * results["m"] * results["a"] * results["s"]
+    count
+        "in"
+        { data =
+            [ ("x", [ { first = 1; last = 4000 } ])
+              ("m", [ { first = 1; last = 4000 } ])
+              ("a", [ { first = 1; last = 4000 } ])
+              ("s", [ { first = 1; last = 4000 } ]) ]
+            |> Map }
