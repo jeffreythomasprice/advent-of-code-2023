@@ -39,32 +39,6 @@ type Rectangle =
     { origin: Vector
       size: Vector }
 
-    // TODO check various things here, may not need all these helpers
-
-    member this.width = this.size.x
-
-    member this.height = this.size.y
-
-    member this.left = this.origin.x
-
-    member this.right = this.origin.x + this.width
-
-    member this.top = this.origin.y
-
-    member this.bottom = this.origin.y + this.height
-
-    member this.contains(v: Vector) =
-        v.x >= this.left && v.x < this.right && v.y >= this.top && v.y < this.bottom
-
-    member this.expand(v: Vector) : Rectangle =
-        let left = min v.x this.left
-        let right = max (v.x + 1L) this.right
-        let top = min v.y this.top
-        let bottom = max (v.y + 1L) this.bottom
-
-        { origin = { x = left; y = top }
-          size = { x = right - left; y = bottom - top } }
-
 type Horizontal =
     { first: int64
       second: int64
@@ -95,31 +69,34 @@ let rec everyTwo (input: 't list) =
     | a :: b :: tail -> (a, b) :: (everyTwo tail)
     | _ -> failwith "odd number of elements"
 
+let flattenOption (input: 't option seq): 't seq =
+    input |> Seq.filter _.IsSome |> Seq.map _.Value
+
 type Range =
-    { first: int64
-      last: int64 }
+    { first: int64; second: int64}
 
-    member this.subtract(others: Range list) : Range seq =
+    member this.subtract (others: Range list): Range seq =
         match others with
-        | [] -> [ this ]
+        | [] -> [this]
         | other :: remainder ->
-            if this.first > other.last || this.last < other.first then
-                [ this ]
-            else if this.first >= other.first && this.last <= other.last then
-                []
-            else if this.first < other.first && this.last > other.last then
-                [ { first = this.first
-                    last = other.first - 1L }
-                  { first = other.last + 1L
-                    last = this.last } ]
-            else if this.first < other.first then
-                [ { first = this.first
-                    last = other.first - 1L } ]
-            else
-                [ { first = other.last + 1L
-                    last = this.last } ]
+            let thisMin = min this.first this.second
+            let thisMax = max this.first this.second
+            let otherMin = min other.first other.second
+            let otherMax = max other.first other.second
+            (
+                if thisMax < otherMin || thisMin > otherMax then
+                    [this]
+                else if thisMin >= otherMin && thisMax <= otherMax then
+                    []
+                else if thisMin < otherMin && thisMax > otherMax then
+                    [ { first = thisMin ; second = otherMin - 1L};
+                      { first = otherMax + 1L; second = thisMax} ]
+                else if thisMin < otherMin then
+                    [ { first = thisMin ; second = otherMin - 1L} ]
+                else
+                    [ { first = otherMax + 1L; second = thisMax} ]
+            )
             |> Seq.collect (fun portion -> portion.subtract remainder)
-
 
 let doIt (input: string) : int64 =
     let lines =
@@ -128,24 +105,6 @@ let doIt (input: string) : int64 =
         |> Seq.map (fun x -> x.Trim())
         |> Seq.filter (fun x -> not (String.IsNullOrWhiteSpace x))
 
-    // TODO JEFF put the real parser back
-    // let input =
-    //     lines
-    //     |> Seq.map (fun line -> Regex("^([UDLR]) ([0-9]+) \(#([0-9a-f]{6})\)$").Match(line))
-    //     |> Seq.map (fun m ->
-    //         let direction =
-    //             match m.Groups[1].Value with
-    //             | "U" -> Up
-    //             | "D" -> Down
-    //             | "L" -> Left
-    //             | "R" -> Right
-    //             | _ -> failwith "bad enum"
-
-    //         let steps = m.Groups[2].Value |> int
-    //         let color = m.Groups[3].Value
-
-    //         { direction = direction; steps = steps })
-    //     |> Seq.toList
     let input =
         lines
         |> Seq.map (fun line -> Regex("^[UDLR] [0-9]+ \(#([0-9a-f]{5})([0-3])\)$").Match(line))
@@ -186,96 +145,105 @@ let doIt (input: string) : int64 =
                       second = second.x
                       y = currentLocation.y })
         |> Seq.map (fun line ->
-            printfn "TODO line = %A" line
+            printfn "line = %A" line
             line)
         |> Seq.toList
 
     let allPoints =
         lines |> Seq.collect (fun line -> [ line.first; line.second ]) |> Seq.toList
 
-    // TODO not needed?
-    let totalBounds =
-        (allPoints
-         |> Seq.fold
-             (fun (r: Rectangle option) v ->
-                 match r with
-                 | Some r -> Some(r.expand v)
-                 | None -> Some({ origin = v; size = { x = 1; y = 1 } }))
-             None)
-            .Value
-
-    printfn "total bounds = %A" totalBounds
-
     let uniqueY = allPoints |> Seq.map (fun v -> v.y) |> SortedSet |> Seq.toList
 
-    let yAndXs =
+    let horizontalLines = 
+        lines |>
+        Seq.map (fun line ->
+            match line with
+            | Horizontal line -> Some line
+            | Vertical _ -> None
+        )
+        |> flattenOption
+
+    let verticalLines = 
+        lines |>
+        Seq.map (fun line ->
+            match line with
+            | Horizontal _ -> None
+            | Vertical line -> Some line
+        )
+        |> flattenOption
+
+    let interiorRegions =
         uniqueY
-        |> Seq.map (fun y ->
-            let allX =
-                lines
+        |> Seq.pairwise
+        |> Seq.map (fun (top, bottom) ->
+            // height including top and bottom would be (bottom - top + 1L)
+            // we want just the top, but not the bottom because that will be the next pair of y coordinates
+            let height = bottom - top
+            printfn "top = %d, bottom = %d, height = %d" top bottom height
+
+            // the horizontal lines on the top of this region
+            let topLines = 
+                horizontalLines
+                |> Seq.filter (fun line -> line.y = top)
+
+            // left to right, the x coordinates of the ranges to fill in
+            let allX = 
+                verticalLines
+                |> Seq.filter (fun line ->
+                    let lineTop = min line.first line.second
+                    let topBottom = max line.first line.second
+                    not (top >= topBottom || bottom <= lineTop)
+                )
                 |> Seq.map (fun line ->
-                    match line with
-                    | Horizontal _ -> None
-                    | Vertical line ->
-                        let lineTop = min line.first line.second
-                        let lineBottom = max line.first line.second
-                        if lineTop <= y && y < lineBottom then Some line else None)
-                |> Seq.filter (fun x -> x.IsSome)
-                |> Seq.map (fun x -> x.Value)
-                |> Seq.map (fun line -> line.x)
+                    line.x
+                )
                 |> Seq.toList
                 |> List.sort
-
-            y, allX)
-
-    yAndXs
-    |> Seq.pairwise
-    |> Seq.map (fun ((top, topX), (bottom, bottomX)) ->
-        let mainAreas =
-            topX
-            |> everyTwo
-            |> Seq.map (fun (left, right) ->
-                printfn "TODO top = %d, bottom = %d, left = %d, right = %d" top bottom left right
-                (bottom - top) * (right - left + 1L))
-            |> Seq.sum
-
-        let horizontalLinesAtTheBottom =
-            lines
-            |> Seq.map (fun line ->
-                match line with
-                | Horizontal line -> if line.y = bottom then Some line else None
-                | Vertical _ -> None)
-            |> Seq.filter (fun x -> x.IsSome)
-            |> Seq.map (fun x -> x.Value)
-            |> Seq.map (fun line ->
-                (*
-                    TODO this is the only thing wrong
-                    we double count horizontal edges that on the area region
-                    need to count all horizontals, but only the portions not covered by pairwise bottomX
-
-                    width += line subtract (union of all horizontal edges formed by pairwise bottomX)
-                *)
-                { first = min line.first line.second
-                  last = max line.first line.second }
-                    .subtract (
-                        bottomX
-                        |> Seq.pairwise
-                        |> Seq.map (fun (left, right) -> { first = left; last = right })
-                        |> Seq.toList
-                    )
+                |> everyTwo
+                |> Seq.map (fun (first, second) -> { first = first; second = second})
+                |> Seq.toList
+            
+            // remove from the horizontal lines on top all the regions here
+            // this lets us keep the portion that represents the bottom of some region above here without double counting any area
+            let topLinesWidth = 
+                topLines
+                |> Seq.collect (fun line ->
+                    { first = min line.first line.second; second = max line.first line.second }.subtract allX 
+                )
                 |> Seq.map (fun range ->
-                    let result = range.last - range.first + 1L
+                    let width = range.second - range.first + 1L
+                    printfn "top line, left = %d, right = %d, width = %d" range.first range.second width
+                    width
+                )
+                |> Seq.sum
 
-                    printfn
-                        "TODO bottomY = %d, horizontal range = %d, %d, result = %d"
-                        bottom
-                        range.first
-                        range.last
-                        result
+            // the area of in between the vertical lines
+            let area = 
+                allX
+                |> Seq.map (fun range ->
+                    let width = range.second - range.first + 1L
+                    let result = width * height
+                    printfn "left = %d, right = %d, width = %d, result = %d" range.first range.second width result
+                    result
+                )
+                |> Seq.sum
+            
+            area + topLinesWidth
+        )
+        |> Seq.sum
 
-                    result)
-                |> Seq.sum)
-            |> Seq.sum
+    // the only place we haven't counted is the bottom line
+    // this can only be horizontal lines and can't possibly be double counted with anything we've already done, so just add those up
+    let lastLine =
+        horizontalLines
+        |> Seq.filter (fun line -> line.y = (uniqueY |> List.last))
+        |> Seq.map (fun line ->
+            let left = min line.first line.second
+            let right = max line.first line.second
+            let width = right - left + 1L
+            printfn "last row y= %d, left = %d, right = %d, width = %d" line.y left right width
+            width
+        )
+        |> Seq.sum
 
-        mainAreas + horizontalLinesAtTheBottom)
-    |> Seq.sum
+    interiorRegions + lastLine
