@@ -35,9 +35,7 @@ type Cell =
     | Colored of string
     | Interior
 
-type Rectangle =
-    { origin: Vector
-      size: Vector }
+type Rectangle = { origin: Vector; size: Vector }
 
 type Horizontal =
     { first: int64
@@ -69,33 +67,37 @@ let rec everyTwo (input: 't list) =
     | a :: b :: tail -> (a, b) :: (everyTwo tail)
     | _ -> failwith "odd number of elements"
 
-let flattenOption (input: 't option seq): 't seq =
-    input |> Seq.filter _.IsSome |> Seq.map _.Value
+let flattenOption (input: 't option seq) : 't seq =
+    input |> Seq.filter (fun x -> x.IsSome) |> Seq.map (fun x -> x.Value)
 
 type Range =
-    { first: int64; second: int64}
+    { first: int64
+      second: int64 }
 
-    member this.subtract (others: Range list): Range seq =
+    member this.subtract(others: Range list) : Range seq =
         match others with
-        | [] -> [this]
+        | [] -> [ this ]
         | other :: remainder ->
             let thisMin = min this.first this.second
             let thisMax = max this.first this.second
             let otherMin = min other.first other.second
             let otherMax = max other.first other.second
-            (
-                if thisMax < otherMin || thisMin > otherMax then
-                    [this]
-                else if thisMin >= otherMin && thisMax <= otherMax then
-                    []
-                else if thisMin < otherMin && thisMax > otherMax then
-                    [ { first = thisMin ; second = otherMin - 1L};
-                      { first = otherMax + 1L; second = thisMax} ]
-                else if thisMin < otherMin then
-                    [ { first = thisMin ; second = otherMin - 1L} ]
-                else
-                    [ { first = otherMax + 1L; second = thisMax} ]
-            )
+
+            (if thisMax < otherMin || thisMin > otherMax then
+                 [ this ]
+             else if thisMin >= otherMin && thisMax <= otherMax then
+                 []
+             else if thisMin < otherMin && thisMax > otherMax then
+                 [ { first = thisMin
+                     second = otherMin - 1L }
+                   { first = otherMax + 1L
+                     second = thisMax } ]
+             else if thisMin < otherMin then
+                 [ { first = thisMin
+                     second = otherMin - 1L } ]
+             else
+                 [ { first = otherMax + 1L
+                     second = thisMax } ])
             |> Seq.collect (fun portion -> portion.subtract remainder)
 
 let doIt (input: string) : int64 =
@@ -154,22 +156,20 @@ let doIt (input: string) : int64 =
 
     let uniqueY = allPoints |> Seq.map (fun v -> v.y) |> SortedSet |> Seq.toList
 
-    let horizontalLines = 
-        lines |>
-        Seq.map (fun line ->
+    let horizontalLines =
+        lines
+        |> Seq.map (fun line ->
             match line with
             | Horizontal line -> Some line
-            | Vertical _ -> None
-        )
+            | Vertical _ -> None)
         |> flattenOption
 
-    let verticalLines = 
-        lines |>
-        Seq.map (fun line ->
+    let verticalLines =
+        lines
+        |> Seq.map (fun line ->
             match line with
             | Horizontal _ -> None
-            | Vertical line -> Some line
-        )
+            | Vertical line -> Some line)
         |> flattenOption
 
     let interiorRegions =
@@ -182,54 +182,48 @@ let doIt (input: string) : int64 =
             printfn "top = %d, bottom = %d, height = %d" top bottom height
 
             // the horizontal lines on the top of this region
-            let topLines = 
-                horizontalLines
-                |> Seq.filter (fun line -> line.y = top)
+            let topLines = horizontalLines |> Seq.filter (fun line -> line.y = top)
 
             // left to right, the x coordinates of the ranges to fill in
-            let allX = 
+            let allX =
                 verticalLines
                 |> Seq.filter (fun line ->
                     let lineTop = min line.first line.second
                     let topBottom = max line.first line.second
-                    not (top >= topBottom || bottom <= lineTop)
-                )
-                |> Seq.map (fun line ->
-                    line.x
-                )
+                    not (top >= topBottom || bottom <= lineTop))
+                |> Seq.map (fun line -> line.x)
                 |> Seq.toList
                 |> List.sort
                 |> everyTwo
-                |> Seq.map (fun (first, second) -> { first = first; second = second})
+                |> Seq.map (fun (first, second) -> { first = first; second = second })
                 |> Seq.toList
-            
+
             // remove from the horizontal lines on top all the regions here
             // this lets us keep the portion that represents the bottom of some region above here without double counting any area
-            let topLinesWidth = 
+            let topLinesWidth =
                 topLines
                 |> Seq.collect (fun line ->
-                    { first = min line.first line.second; second = max line.first line.second }.subtract allX 
-                )
+                    { first = min line.first line.second
+                      second = max line.first line.second }
+                        .subtract
+                        allX)
                 |> Seq.map (fun range ->
                     let width = range.second - range.first + 1L
                     printfn "top line, left = %d, right = %d, width = %d" range.first range.second width
-                    width
-                )
+                    width)
                 |> Seq.sum
 
             // the area of in between the vertical lines
-            let area = 
+            let area =
                 allX
                 |> Seq.map (fun range ->
                     let width = range.second - range.first + 1L
                     let result = width * height
                     printfn "left = %d, right = %d, width = %d, result = %d" range.first range.second width result
-                    result
-                )
+                    result)
                 |> Seq.sum
-            
-            area + topLinesWidth
-        )
+
+            area + topLinesWidth)
         |> Seq.sum
 
     // the only place we haven't counted is the bottom line
@@ -242,8 +236,7 @@ let doIt (input: string) : int64 =
             let right = max line.first line.second
             let width = right - left + 1L
             printfn "last row y= %d, left = %d, right = %d, width = %d" line.y left right width
-            width
-        )
+            width)
         |> Seq.sum
 
     interiorRegions + lastLine
