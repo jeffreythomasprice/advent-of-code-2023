@@ -29,12 +29,14 @@ type PossibleParts =
                     else if a.first < b.first && a.last > b.last then
                         [ { first = a.first; last = b.first - 1 }
                           { first = b.last + 1; last = a.last } ]
-                    else if a.first < b.first then
+                    else if a.first < b.first && a.last >= b.first && a.last <= b.last then
                         [ { first = a.first; last = b.first - 1 } ]
-                    else
+                    else if a.last > b.last && a.first >= b.first && a.first <= b.first then
                         [ { first = b.last + 1; last = a.last } ]
+                    else
+                        failwith "should be impossible"
 
-                aSubB |> List.collect (fun r -> subtract a remainder)
+                aSubB |> List.collect (fun r -> subtract r remainder)
             | [] -> [ a ]
 
         let subtract (a: SparseSet) (b: SparseSet) : SparseSet =
@@ -44,7 +46,9 @@ type PossibleParts =
 
         { data =
             Set.union (this.data.Keys |> Set) (other.data.Keys |> Set)
-            |> Seq.map (fun name -> name, (union this.data[name] other.data[name]))
+            |> Seq.map (fun name ->
+                let results = union this.data[name] other.data[name]
+                name, results)
             |> Map }
 
     member this.count() =
@@ -106,31 +110,35 @@ type Rule =
         { matches = { data = input.data |> Map.add this.name result.matches }
           doesntMatch = { data = input.data |> Map.add this.name result.doesntMatch } }
 
-let combine (map: Map<string, PossibleParts>) (name: string) (input: PossibleParts) =
-    let update =
-        match map |> Map.tryFind name with
-        | Some existing -> input.union existing
-        | None -> input
-
-    map |> Map.add name update
-
 type Workflow =
     { rules: Rule list
       defaultTarget: string }
 
     // returns the mapping of next workflow names to the set of parts that go there
-    member this.eval(part: PossibleParts) : Map<string, PossibleParts> =
+    member this.eval(part: PossibleParts) : Map<string, PossibleParts list> =
         let results, didntMatchAny =
             this.rules
             |> Seq.fold
-                (fun (results: (Map<string, PossibleParts> * PossibleParts)) rule ->
+                (fun (results: (Map<string, PossibleParts list> * PossibleParts)) rule ->
                     let results, part = results
                     let ruleResults = rule.applyParts part
-                    let results = combine results rule.target ruleResults.matches
+
+                    let results =
+                        results
+                        |> Map.add
+                            rule.target
+                            (ruleResults.matches :: (results.TryFind rule.target |> Option.defaultValue []))
+
                     (results, ruleResults.doesntMatch))
                 (Map.empty, part)
 
-        combine results this.defaultTarget didntMatchAny
+        let results =
+            results
+            |> Map.add
+                this.defaultTarget
+                (didntMatchAny :: (results.TryFind this.defaultTarget |> Option.defaultValue []))
+
+        results
 
 let doIt (input: string) : int64 =
     let lines =
@@ -179,26 +187,26 @@ let doIt (input: string) : int64 =
               defaultTarget = defaultTarget })
         |> Map
 
-    let rec count (workflowName: string) (parts: PossibleParts) : int64 =
+    let rec count (finalWorkflowName: string) (workflowName: string) (parts: PossibleParts) : int64 =
         let workflow = workflows[workflowName]
         let results = workflow.eval parts
 
-        (results.TryFind "A"
-         |> Option.map (fun parts -> parts.count ())
+        (results.TryFind finalWorkflowName
+         |> Option.map (fun parts -> parts |> Seq.sumBy (fun parts -> parts.count ()))
          |> Option.defaultValue 0L)
         + (results
            |> Map.toSeq
            |> Seq.filter (fun (name, _) -> name <> "A" && name <> "R")
-           |> Seq.map (fun (name, child) -> count name child)
+           |> Seq.collect (fun (name, children) ->
+               children |> Seq.map (fun child -> count finalWorkflowName name child))
            |> Seq.sum)
 
-    // TODO too high, 169280328932458
-
-    count
-        "in"
+    let input =
         { data =
             [ ("x", [ { first = 1; last = 4000 } ])
               ("m", [ { first = 1; last = 4000 } ])
               ("a", [ { first = 1; last = 4000 } ])
               ("s", [ { first = 1; last = 4000 } ]) ]
             |> Map }
+
+    count "A" "in" input
